@@ -48,6 +48,21 @@ export default function App() {
   // Expand State
   const [showExpandMenu, setShowExpandMenu] = useState(false);
 
+  // --- API Configuration ---
+  const [userApiKey, setUserApiKey] = useState(() => localStorage.getItem('lyra_api_key') || '');
+  const [apiBaseUrl, setApiBaseUrl] = useState(() => localStorage.getItem('lyra_api_base_url') || '');
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // Helper to get initialized AI client
+  const getAiClient = () => {
+    const key = userApiKey || process.env.API_KEY || '';
+    const options: any = { apiKey: key };
+    if (apiBaseUrl) {
+        options.httpOptions = { baseUrl: apiBaseUrl };
+    }
+    return new GoogleGenAI(options);
+  }
+
   // --- Drive State ---
   const [isDriveConnected, setIsDriveConnected] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -361,7 +376,7 @@ export default function App() {
                 : "🎨 正在智能扩展画幅 (Outpainting)..."
         });
 
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const ai = getAiClient();
         const base64Data = sourceImageUrl.split(',')[1];
         const mimeType = sourceImageUrl.split(';')[0].split(':')[1];
 
@@ -422,7 +437,7 @@ export default function App() {
   const handleInpaintSubmit = async (maskBase64: string, prompt: string, referenceImage?: string, materialImage?: string) => {
      if (!inpaintTargetImage) return;
 
-     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+     const ai = getAiClient();
      setActiveRequests(prev => prev + 1);
      
      let msgPrefix = "🖌️ [局部重绘] ";
@@ -579,7 +594,7 @@ export default function App() {
     if (progress > 90) setProgress(50); 
     else if (progress === 0) setProgress(2);
 
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAiClient();
 
     // API Retry Wrapper
     const generateWithRetry = async (model: string, params: any, retries = 3) => {
@@ -1131,7 +1146,7 @@ You MUST structure your response exactly as follows:
           </div>
         </div>
         <div className="p-4 border-t border-slate-200 dark:border-slate-800">
-           <div className="flex items-center gap-3 px-3 py-2 text-sm text-slate-500"><Settings size={18} /><span className="hidden md:block">Configuration</span></div>
+           <div className="flex items-center gap-3 px-3 py-2 text-sm text-slate-500 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors" onClick={() => setShowSettingsModal(true)}><Settings size={18} /><span className="hidden md:block">Configuration</span></div>
         </div>
       </div>
 
@@ -1181,6 +1196,67 @@ You MUST structure your response exactly as follows:
                         <span className="text-[10px] text-yellow-700 dark:text-yellow-400 leading-tight">
                             Ensure your OAuth Client is configured with "https://www.googleapis.com/auth/drive.file" scope and the correct Authorized Origin.
                         </span>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* Settings Modal */}
+        {showSettingsModal && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-md border border-slate-200 dark:border-slate-800">
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+                        <Settings size={20} className="text-indigo-500"/> API Configuration
+                    </h3>
+                    
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                                API Base URL (Optional)
+                            </label>
+                            <input 
+                                type="text"
+                                value={apiBaseUrl}
+                                onChange={(e) => setApiBaseUrl(e.target.value)}
+                                placeholder="https://generativelanguage.googleapis.com"
+                                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">Use this to point to a proxy or custom endpoint</p>
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                                API Key (Optional Override)
+                            </label>
+                            <input 
+                                type="password"
+                                value={userApiKey}
+                                onChange={(e) => setUserApiKey(e.target.value)}
+                                placeholder="Starts with AIza..."
+                                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">Leave empty to use .env key</p>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 mt-6">
+                        <button 
+                            onClick={() => setShowSettingsModal(false)}
+                            className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            onClick={() => {
+                                localStorage.setItem('lyra_api_key', userApiKey);
+                                localStorage.setItem('lyra_api_base_url', apiBaseUrl);
+                                setShowSettingsModal(false);
+                                alert('Settings saved!');
+                            }}
+                            className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm transition-all"
+                        >
+                            Save Settings
+                        </button>
                     </div>
                 </div>
             </div>
