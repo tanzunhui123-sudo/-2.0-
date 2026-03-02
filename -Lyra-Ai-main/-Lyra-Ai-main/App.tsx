@@ -51,13 +51,16 @@ export default function App() {
   // --- API Configuration ---
   const [userApiKey, setUserApiKey] = useState(() => localStorage.getItem('lyra_api_key') || '');
   const [apiBaseUrl, setApiBaseUrl] = useState(() => localStorage.getItem('lyra_api_base_url') || '');
+  const [apiProvider, setApiProvider] = useState<'google' | 'kie' | 'custom'>(() => (localStorage.getItem('lyra_api_provider') as any) || 'google');
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   // Helper to get initialized AI client
   const getAiClient = () => {
     const key = userApiKey || process.env.API_KEY || '';
     const options: any = { apiKey: key };
-    if (apiBaseUrl) {
+    if (apiProvider === 'kie') {
+        options.httpOptions = { baseUrl: 'https://api.kie.ai/google/v1beta' };
+    } else if (apiProvider === 'custom' && apiBaseUrl) {
         options.httpOptions = { baseUrl: apiBaseUrl };
     }
     return new GoogleGenAI(options);
@@ -1210,32 +1213,52 @@ You MUST structure your response exactly as follows:
                     </h3>
                     
                     <div className="space-y-4">
+                        {/* Provider Selection */}
                         <div>
-                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                                API Base URL (Optional)
-                            </label>
-                            <input 
-                                type="text"
-                                value={apiBaseUrl}
-                                onChange={(e) => setApiBaseUrl(e.target.value)}
-                                placeholder="https://generativelanguage.googleapis.com"
-                                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                            />
-                            <p className="text-[10px] text-slate-400 mt-1">Use this to point to a proxy or custom endpoint</p>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">API Provider</label>
+                            <div className="grid grid-cols-3 gap-2">
+                                <button onClick={() => setApiProvider('google')} className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-xs font-medium ${apiProvider === 'google' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-600' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'}`}>
+                                    <Sparkles size={18}/> Google AI
+                                </button>
+                                <button onClick={() => setApiProvider('kie')} className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-xs font-medium ${apiProvider === 'kie' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-600' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'}`}>
+                                    <Cloud size={18}/> Kie.ai
+                                </button>
+                                <button onClick={() => setApiProvider('custom')} className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-xs font-medium ${apiProvider === 'custom' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-600' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'}`}>
+                                    <Layers size={18}/> Custom Proxy
+                                </button>
+                            </div>
                         </div>
+
+                        {/* Custom Base URL - only shown for custom provider */}
+                        {apiProvider === 'custom' && (
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                                    Proxy Base URL
+                                </label>
+                                <input 
+                                    type="text"
+                                    value={apiBaseUrl}
+                                    onChange={(e) => setApiBaseUrl(e.target.value)}
+                                    placeholder="https://your-proxy.example.com/v1beta"
+                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                />
+                                <p className="text-[10px] text-slate-400 mt-1">Enter the base URL of your third-party proxy</p>
+                            </div>
+                        )}
 
                         <div>
                             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                                API Key (Optional Override)
+                                API Key {apiProvider === 'google' ? '(Optional Override)' : ''}
                             </label>
                             <input 
                                 type="password"
                                 value={userApiKey}
                                 onChange={(e) => setUserApiKey(e.target.value)}
-                                placeholder="Starts with AIza..."
+                                placeholder={apiProvider === 'google' ? 'Starts with AIza... (leave empty to use .env key)' : 'Enter your API key'}
                                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                             />
-                            <p className="text-[10px] text-slate-400 mt-1">Leave empty to use .env key</p>
+                            {apiProvider === 'google' && <p className="text-[10px] text-slate-400 mt-1">Leave empty to use .env key</p>}
+                            {apiProvider === 'kie' && <p className="text-[10px] text-slate-400 mt-1">Enter your api.kie.ai API key</p>}
                         </div>
                     </div>
 
@@ -1250,6 +1273,7 @@ You MUST structure your response exactly as follows:
                             onClick={() => {
                                 localStorage.setItem('lyra_api_key', userApiKey);
                                 localStorage.setItem('lyra_api_base_url', apiBaseUrl);
+                                localStorage.setItem('lyra_api_provider', apiProvider);
                                 setShowSettingsModal(false);
                                 alert('Settings saved!');
                             }}
