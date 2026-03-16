@@ -54,6 +54,29 @@ export default function App() {
   const [apiProvider, setApiProvider] = useState<'google' | 'kie' | 'custom'>(() => (localStorage.getItem('lyra_api_provider') as any) || 'google');
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
+  // --- 模型配置 ---
+  // 文本模型（Architect 提示词分析）
+  const textModelOptions = [
+    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview ⭐' },
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro Preview' },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+  ];
+  // 图像模型（Designer 生图 / Inpainting / Expand）
+  const imageModelOptions = [
+    { id: 'gemini-3.1-flash-image-preview', name: 'Gemini 3.1 Flash Image Preview ⭐' },
+    { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image Preview' },
+    { id: 'gemini-2.5-flash-image', name: 'Gemini 2.5 Flash Image' },
+  ];
+  const [selectedTextModel, setSelectedTextModel] = useState(() => {
+    const c = localStorage.getItem('lyra_text_model');
+    return (c && textModelOptions.some(m => m.id === c)) ? c : 'gemini-3.1-pro-preview';
+  });
+  const [selectedImageModel, setSelectedImageModel] = useState(() => {
+    const c = localStorage.getItem('lyra_image_model');
+    return (c && imageModelOptions.some(m => m.id === c)) ? c : 'gemini-3.1-flash-image-preview';
+  });
+
   // Helper to get initialized AI client
   const getAiClient = () => {
     const key = userApiKey || process.env.API_KEY || '';
@@ -227,7 +250,8 @@ export default function App() {
 
   // Progress Bar Simulation Effect
   useEffect(() => {
-    let interval: any;
+    let interval: NodeJS.Timeout | null = null;
+    let timer: NodeJS.Timeout | null = null;
     
     if (activeRequests > 0) {
       if (progress === 0) setProgress(2);
@@ -243,15 +267,17 @@ export default function App() {
     } else {
       if (progress > 0) {
         setProgress(100);
-        const timer = setTimeout(() => {
+        timer = setTimeout(() => {
           setProgress(0);
         }, 800);
-        return () => clearTimeout(timer);
       }
     }
 
-    return () => clearInterval(interval);
-  }, [activeRequests]);
+    return () => {
+      if (interval) clearInterval(interval);
+      if (timer) clearTimeout(timer);
+    };
+  }, [activeRequests, progress]);
 
   const handleSelectApiKey = async () => {
     if (window.aistudio) {
@@ -312,7 +338,7 @@ export default function App() {
   };
 
   const handleStandaloneInpaintUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-     const file = e.target.files?.[0];
+     const file = e.target.files?.[0] as File | undefined;
      if (!file) return;
      const reader = new FileReader();
      reader.onload = (event) => {
@@ -403,7 +429,7 @@ export default function App() {
         }
 
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-image-preview',
+            model: selectedImageModel,
             contents: { parts },
             config
         });
@@ -518,7 +544,7 @@ export default function App() {
         parts.push({ text: finalPrompt });
 
         const response = await ai.models.generateContent({
-          model: 'gemini-3-pro-image-preview', 
+          model: selectedImageModel, 
           contents: { parts },
           config: { imageConfig: { aspectRatio: targetAspectRatio, imageSize: '2K' } }
         });
@@ -642,7 +668,7 @@ export default function App() {
                 parts.push({ text: promptText });
 
                 const response = await generateWithRetry(
-                    'gemini-3-pro-preview', 
+                    selectedTextModel, 
                     {
                         contents: { parts },
                         config: {
@@ -787,7 +813,7 @@ You MUST structure your response exactly as follows:
 
                 // Use the retry wrapper for image generation
                 const response = await generateWithRetry(
-                    'gemini-3-pro-image-preview',
+                    selectedImageModel,
                     {
                         contents: { parts },
                         config: {
@@ -877,12 +903,14 @@ You MUST structure your response exactly as follows:
     const fileArray = Array.from(files);
     
     // Process each file
-    fileArray.forEach(file => {
+    fileArray.forEach((file: any) => {
         const reader = new FileReader();
         reader.onloadend = () => {
+          if (reader.result) {
             setPendingImages(prev => [...prev, reader.result as string]);
+          }
         };
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(file as Blob);
     });
     
     e.target.value = '';
@@ -894,9 +922,11 @@ You MUST structure your response exactly as follows:
 
      const reader = new FileReader();
      reader.onloadend = () => {
+       if (reader.result) {
          setSceneRefImage(reader.result as string);
+       }
      };
-     reader.readAsDataURL(file);
+     reader.readAsDataURL(file as Blob);
      e.target.value = '';
   };
 
@@ -905,21 +935,32 @@ You MUST structure your response exactly as follows:
       setPendingImages(prev => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
+  // Auto-cleanup: Remove old messages when history gets too large (limit to 100 messages)
+  useEffect(() => {
+    if (messages.length > 100) {
+      // Keep the initial message and last 99 messages
+      setMessages(prev => {
+        if (prev.length <= 1) return prev;
+        return [INITIAL_MESSAGE, ...prev.slice(-(99))];
+      });
+    }
+  }, [messages.length]);
+
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData.items;
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image') !== -1) {
         e.preventDefault();
-        const file = items[i].getAsFile();
+        const file = items[i].getAsFile() as File | null;
         if (file) {
           const reader = new FileReader();
           reader.onloadend = () => {
-            setPendingImages(prev => [...prev, reader.result as string]);
+            if (reader.result) {
+              setPendingImages(prev => [...prev, reader.result as string]);
+            }
           };
           reader.readAsDataURL(file);
         }
-        // Continue to find more images if multiple pasted? usually paste is one item, 
-        // but we don't return immediately to allow scanning all items if supported.
       }
     }
   };
@@ -934,8 +975,8 @@ You MUST structure your response exactly as follows:
     document.body.removeChild(link);
   };
 
-  // Helper to extract generated images for the sidebar gallery
-  const generatedImages = messages.filter(m => m.type === 'image' && m.role === 'assistant');
+  // Helper to extract generated images for the sidebar gallery (limit to last 20 to prevent memory overflow)
+  const generatedImages = messages.filter(m => m.type === 'image' && m.role === 'assistant').slice(-20);
 
   if (!hasApiKey) {
     return (
@@ -1260,6 +1301,36 @@ You MUST structure your response exactly as follows:
                             {apiProvider === 'google' && <p className="text-[10px] text-slate-400 mt-1">Leave empty to use .env key</p>}
                             {apiProvider === 'kie' && <p className="text-[10px] text-slate-400 mt-1">Enter your api.kie.ai API key</p>}
                         </div>
+
+                        {/* 文本模型选择 */}
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">📝 文本分析模型 (提示词架构师)</label>
+                            <select
+                                value={selectedTextModel}
+                                onChange={(e) => setSelectedTextModel(e.target.value)}
+                                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-white"
+                            >
+                                {textModelOptions.map(m => (
+                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                            </select>
+                            <p className="text-[10px] text-slate-400 mt-1">用于「提示词架构师」模式的文本解析</p>
+                        </div>
+
+                        {/* 图像模型选择 */}
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">🎨 图像生成模型 (生图/重绘/扩展)</label>
+                            <select
+                                value={selectedImageModel}
+                                onChange={(e) => setSelectedImageModel(e.target.value)}
+                                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-white"
+                            >
+                                {imageModelOptions.map(m => (
+                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                            </select>
+                            <p className="text-[10px] text-slate-400 mt-1">用于「生图大师」、局部重绘、图像扩展等功能</p>
+                        </div>
                     </div>
 
                     <div className="flex justify-end gap-3 mt-6">
@@ -1274,6 +1345,8 @@ You MUST structure your response exactly as follows:
                                 localStorage.setItem('lyra_api_key', userApiKey);
                                 localStorage.setItem('lyra_api_base_url', apiBaseUrl);
                                 localStorage.setItem('lyra_api_provider', apiProvider);
+                                localStorage.setItem('lyra_text_model', selectedTextModel);
+                                localStorage.setItem('lyra_image_model', selectedImageModel);
                                 setShowSettingsModal(false);
                                 alert('Settings saved!');
                             }}

@@ -290,8 +290,8 @@ export const createHistoryFile = async (content: string): Promise<string> => {
 
     const accessToken = gapi.client.getToken().access_token;
     const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-    form.append('file', fileContent);
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }) as any);
+    form.append('file', fileContent as any);
 
     const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
         method: 'POST',
@@ -313,8 +313,8 @@ export const updateHistoryFile = async (fileId: string, content: string) => {
 
     const accessToken = gapi.client.getToken().access_token;
     const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-    form.append('file', fileContent);
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }) as any);
+    form.append('file', fileContent as any);
 
     await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`, {
         method: 'PATCH',
