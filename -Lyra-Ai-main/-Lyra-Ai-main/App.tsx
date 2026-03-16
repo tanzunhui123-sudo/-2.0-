@@ -227,7 +227,8 @@ export default function App() {
 
   // Progress Bar Simulation Effect
   useEffect(() => {
-    let interval: any;
+    let interval: NodeJS.Timeout | null = null;
+    let timer: NodeJS.Timeout | null = null;
     
     if (activeRequests > 0) {
       if (progress === 0) setProgress(2);
@@ -243,15 +244,17 @@ export default function App() {
     } else {
       if (progress > 0) {
         setProgress(100);
-        const timer = setTimeout(() => {
+        timer = setTimeout(() => {
           setProgress(0);
         }, 800);
-        return () => clearTimeout(timer);
       }
     }
 
-    return () => clearInterval(interval);
-  }, [activeRequests]);
+    return () => {
+      if (interval) clearInterval(interval);
+      if (timer) clearTimeout(timer);
+    };
+  }, [activeRequests, progress]);
 
   const handleSelectApiKey = async () => {
     if (window.aistudio) {
@@ -312,7 +315,7 @@ export default function App() {
   };
 
   const handleStandaloneInpaintUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-     const file = e.target.files?.[0];
+     const file = e.target.files?.[0] as File | undefined;
      if (!file) return;
      const reader = new FileReader();
      reader.onload = (event) => {
@@ -877,12 +880,14 @@ You MUST structure your response exactly as follows:
     const fileArray = Array.from(files);
     
     // Process each file
-    fileArray.forEach(file => {
+    fileArray.forEach((file: any) => {
         const reader = new FileReader();
         reader.onloadend = () => {
+          if (reader.result) {
             setPendingImages(prev => [...prev, reader.result as string]);
+          }
         };
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(file as Blob);
     });
     
     e.target.value = '';
@@ -894,9 +899,11 @@ You MUST structure your response exactly as follows:
 
      const reader = new FileReader();
      reader.onloadend = () => {
+       if (reader.result) {
          setSceneRefImage(reader.result as string);
+       }
      };
-     reader.readAsDataURL(file);
+     reader.readAsDataURL(file as Blob);
      e.target.value = '';
   };
 
@@ -905,21 +912,32 @@ You MUST structure your response exactly as follows:
       setPendingImages(prev => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
+  // Auto-cleanup: Remove old messages when history gets too large (limit to 100 messages)
+  useEffect(() => {
+    if (messages.length > 100) {
+      // Keep the initial message and last 99 messages
+      setMessages(prev => {
+        if (prev.length <= 1) return prev;
+        return [INITIAL_MESSAGE, ...prev.slice(-(99))];
+      });
+    }
+  }, [messages.length]);
+
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData.items;
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image') !== -1) {
         e.preventDefault();
-        const file = items[i].getAsFile();
+        const file = items[i].getAsFile() as File | null;
         if (file) {
           const reader = new FileReader();
           reader.onloadend = () => {
-            setPendingImages(prev => [...prev, reader.result as string]);
+            if (reader.result) {
+              setPendingImages(prev => [...prev, reader.result as string]);
+            }
           };
           reader.readAsDataURL(file);
         }
-        // Continue to find more images if multiple pasted? usually paste is one item, 
-        // but we don't return immediately to allow scanning all items if supported.
       }
     }
   };
@@ -934,8 +952,8 @@ You MUST structure your response exactly as follows:
     document.body.removeChild(link);
   };
 
-  // Helper to extract generated images for the sidebar gallery
-  const generatedImages = messages.filter(m => m.type === 'image' && m.role === 'assistant');
+  // Helper to extract generated images for the sidebar gallery (limit to last 20 to prevent memory overflow)
+  const generatedImages = messages.filter(m => m.type === 'image' && m.role === 'assistant').slice(-20);
 
   if (!hasApiKey) {
     return (
