@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  lyra-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_GEMINI_API_KEY: ${VITE_GEMINI_API_KEY}
+    container_name: lyra-ai-app
+    ports:
+      - "80:80"
+    environment:
+      - VITE_GEMINI_API_KEY=${VITE_GEMINI_API_KEY}
+    restart: unless-stopped
+    networks:
+      - lyra-network
+
+networks:
+  lyra-network:
+    driver: bridge
