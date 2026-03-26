@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Aperture, Copy, Check, Download, Brush, Quote } from 'lucide-react';
+import { User, Aperture, Copy, Check, Download, Brush, Quote, ImagePlus, Layers } from 'lucide-react';
 import { Message } from '../types';
 
 interface MessageBubbleProps {
@@ -7,11 +7,14 @@ interface MessageBubbleProps {
   onImageClick?: (url: string) => void;
   onEditClick?: (url: string) => void;
   onQuoteClick?: (text: string) => void;
+  onSendToInput?: (url: string) => void;
+  onSendToScene?: (url: string) => void;
 }
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onImageClick, onEditClick, onQuoteClick }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onImageClick, onEditClick, onQuoteClick, onSendToInput, onSendToScene }) => {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
+  const [showRefMenu, setShowRefMenu] = useState(false);
 
   const handleCopy = (text: string) => {
     // Compatible copy logic
@@ -42,15 +45,22 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onImageClick, on
     document.body.removeChild(textArea);
   };
 
-  const handleDownload = (imageUrl: string, e?: React.MouseEvent) => {
+  const handleDownload = async (imageUrl: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    const link = document.createElement('a');
-    link.href = imageUrl;
-    link.download = `Lyra_Generated_${Date.now()}.jpg`;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      const resp = await fetch(imageUrl);
+      const blob = await resp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `Lyra_Generated_${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.open(imageUrl, '_blank');
+    }
   };
 
   const renderContent = (content: string) => {
@@ -60,10 +70,50 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onImageClick, on
           className="relative group rounded-xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-700 max-w-sm transition-all hover:shadow-md bg-slate-100 dark:bg-slate-900 cursor-zoom-in"
           onClick={() => onImageClick && onImageClick(content)}
         >
-           <img src={content} alt="Content" className="w-full h-auto object-cover" />
+           <img 
+             src={content} 
+             alt="Content" 
+             className="w-full h-auto object-cover" 
+             draggable="true"
+             onDragStart={(e) => {
+               e.dataTransfer.setData('text/plain', content);
+               e.dataTransfer.setData('application/x-lyra-image', content);
+               e.dataTransfer.effectAllowed = 'copy';
+             }}
+           />
            
            {/* Image Actions Overlay */}
            <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+             {/* Reference Menu Button */}
+             <div className="relative">
+               <button 
+                 onClick={(e) => { e.stopPropagation(); setShowRefMenu(!showRefMenu); }}
+                 className="p-2 bg-black/50 hover:bg-indigo-600 text-white rounded-full backdrop-blur-sm transition-colors"
+                 title="引用到..."
+               >
+                 <Quote size={16} />
+               </button>
+               {showRefMenu && (
+                 <div className="absolute right-0 top-full mt-1 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 py-1.5 min-w-[140px] z-50 animate-in fade-in slide-in-from-top-1 duration-150" onClick={(e) => e.stopPropagation()}>
+                   {onSendToInput && (
+                     <button 
+                       onClick={() => { onSendToInput(content); setShowRefMenu(false); }}
+                       className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
+                     >
+                       <Layers size={14} className="text-indigo-500"/> 产品图输入
+                     </button>
+                   )}
+                   {onSendToScene && (
+                     <button 
+                       onClick={() => { onSendToScene(content); setShowRefMenu(false); }}
+                       className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors"
+                     >
+                       <ImagePlus size={14} className="text-purple-500"/> 场景参考
+                     </button>
+                   )}
+                 </div>
+               )}
+             </div>
              {onEditClick && (
                <button 
                  onClick={(e) => { e.stopPropagation(); onEditClick(content); }}
