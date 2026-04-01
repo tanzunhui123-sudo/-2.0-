@@ -31,8 +31,8 @@ export default function App() {
   
   // Changed from single string to array of strings for multi-upload support
   const [pendingImages, setPendingImages] = useState<string[]>([]);
-  // New state for Scene Reference Image
-  const [sceneRefImage, setSceneRefImage] = useState<string | null>(null);
+  // New state for Scene Reference Images (supports multiple)
+  const [sceneRefImages, setSceneRefImages] = useState<string[]>([]);
   
   const [hasApiKey, setHasApiKey] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
@@ -756,14 +756,16 @@ export default function App() {
         });
     }
 
-    // Add Scene Reference Image to chat if present
-    if (sceneRefImage) {
-        addMessage({ id: timestamp + msgIdOffset++, role: 'user', type: 'image', content: sceneRefImage });
+    // Add Scene Reference Images to chat if present
+    if (sceneRefImages.length > 0) {
+        sceneRefImages.forEach(refImg => {
+            addMessage({ id: timestamp + msgIdOffset++, role: 'user', type: 'image', content: refImg });
+        });
     }
 
     // Add text to chat (once)
     let displayPrompt = inputText;
-    if (sceneRefImage && pendingImages.length > 0) {
+    if (sceneRefImages.length > 0 && pendingImages.length > 0) {
         displayPrompt = `[参考场景复刻] ${inputText}`;
     }
     
@@ -774,14 +776,15 @@ export default function App() {
     // Capture state for the generation process
     const currentInput = inputText;
     const currentImages = [...pendingImages];
-    const currentSceneRef = sceneRefImage;
+    const currentSceneRefs = [...sceneRefImages];
+    const currentSceneRef = currentSceneRefs.length > 0 ? currentSceneRefs[0] : null;
     const colorContext = accentColor ? `\n\nDESIGN CONSTRAINT: Use the color ${accentColor} as a primary accent or dominant tone.` : '';
     
     // Reset Input State logic:
     if (mode !== 'master') {
         setInputText('');
         setPendingImages([]);
-        setSceneRefImage(null);
+        setSceneRefImages([]);
     }
 
     // --- 2. Define Generation Logic ---
@@ -924,43 +927,54 @@ You MUST structure your response exactly as follows:
                   : "\n\nPHOTO QUALITY: Shot on Sony A7R V with 85mm f/1.4 GM lens. Natural ambient lighting with soft fill. RAW-quality color depth, fine grain texture, true-to-life skin tones and material rendering. 8K resolution, professional color grading. The final image must be indistinguishable from a real professional photograph.";
 
                 // 3. Construct Prompt based on inputs
+                const sceneRefCount = currentSceneRefs.length;
                 if (image && currentSceneRef) {
                     // 场景参考 + 产品图：替换场景中的产品为上传的产品
+                    const sceneInputDesc = sceneRefCount > 1
+                      ? `- Images 2-${1 + sceneRefCount}: SCENE REFERENCES (${sceneRefCount} reference images defining the target environment, lighting style, composition, and camera angle. Synthesize the best elements from all references.)`
+                      : `- Image 2: THE SCENE REFERENCE (defines the target environment, lighting, composition, and camera angle).`;
+
                     prompt = `You are an elite commercial photographer and compositing specialist.
 
 INPUTS:
 - Image 1: THE PRODUCT (absolute source of truth for product appearance — shape, texture, material, color, branding must be preserved with 100% fidelity).
-- Image 2: THE SCENE REFERENCE (defines the target environment, lighting, composition, and camera angle).
+${sceneInputDesc}
 
 PRIMARY TASK — PRODUCT REPLACEMENT:
-Replace any existing product/object in the Scene Reference (Image 2) with the Product (Image 1). 
-The Product must be seamlessly composited into the exact position and scale where the original product was in the scene.
+${sceneRefCount > 1 
+  ? `Analyze all ${sceneRefCount} scene references to understand the desired environment style, lighting, and composition. Create a unified scene that combines the best elements from all references, then seamlessly composite the Product into this scene.`
+  : `Replace any existing product/object in the Scene Reference (Image 2) with the Product (Image 1). 
+The Product must be seamlessly composited into the exact position and scale where the original product was in the scene.`}
 
 PERSPECTIVE RULES:
 ${hasPerspectiveHint 
   ? `- The user has specified a camera angle: "${userInput}". Follow this angle PRECISELY for the final composite.` 
-  : `- Match the EXACT camera angle and perspective of the Scene Reference (Image 2). The Product must be re-rendered from the same viewing angle as the scene.`}
+  : `- Match the EXACT camera angle and perspective of the Scene Reference${sceneRefCount > 1 ? 's' : ''}. The Product must be re-rendered from the same viewing angle as the scene.`}
 
 COMPOSITING REQUIREMENTS:
-- Lighting direction, intensity, color temperature must match Image 2 exactly.
+- Lighting direction, intensity, color temperature must match the scene reference${sceneRefCount > 1 ? 's' : ''} exactly.
 - Cast shadows and reflections must be physically accurate for the scene's light sources.
-- Depth of field and focus plane must match Image 2.
+- Depth of field and focus plane must match the scene reference.
 - Surface interactions (reflections on tables, soft shadows on fabric, etc.) must be realistic.
 - ${userInput || "Ensure a seamless, photorealistic integration where the product looks native to the scene."}
 ${colorContext}${qualitySuffix}`;
 
                 } else if (currentSceneRef && !image) {
                     // 只有场景参考图，无产品图：透视角度转换
+                    const sceneInputLabel = sceneRefCount > 1
+                      ? `- Images 1-${sceneRefCount}: SCENE REFERENCES (${sceneRefCount} reference scene photographs — synthesize their environment, style, and composition).`
+                      : `- Image 1: THE SCENE (a reference scene/environment photograph).`;
+
                     prompt = `You are an expert 3D scene reconstruction and camera perspective specialist.
 
 INPUT:
-- Image 1: THE SCENE (a reference scene/environment photograph).
+${sceneInputLabel}
 
-TASK — PERSPECTIVE TRANSFORMATION:
+TASK — ${sceneRefCount > 1 ? 'SCENE SYNTHESIS & TRANSFORMATION' : 'PERSPECTIVE TRANSFORMATION'}:
 ${hasPerspectiveHint
-  ? `Transform/re-render this scene from the following camera angle as specified by the user: "${userInput}". 
+  ? `${sceneRefCount > 1 ? `Analyze all ${sceneRefCount} scene references and synthesize them into one cohesive scene, then t` : 'T'}ransform/re-render this scene from the following camera angle as specified by the user: "${userInput}". 
 Reconstruct the 3D space of the scene and re-project it from the requested viewpoint with accurate parallax, occlusion, and foreshortening.`
-  : `${userInput || "Re-render this scene with enhanced composition and lighting."}`}
+  : `${sceneRefCount > 1 ? `Analyze all ${sceneRefCount} scene reference images and create a unified scene that combines the best elements (environment, lighting, atmosphere, composition) from each reference. ` : ''}${userInput || "Re-render this scene with enhanced composition and lighting."}`}
 
 REQUIREMENTS:
 - Maintain all scene elements (furniture, objects, materials, textures, colors) with full fidelity.
@@ -1032,7 +1046,7 @@ ${qualitySuffix}`;
                     // === Kie.ai image generation ===
                     const inputImages: string[] = [];
                     if (image) inputImages.push(image);
-                    if (currentSceneRef) inputImages.push(currentSceneRef);
+                    currentSceneRefs.forEach(ref => inputImages.push(ref));
 
                     generatedImageUrl = await kieGenerateImage(prompt, inputImages, {
                         aspectRatio: aspectRatio,
@@ -1046,11 +1060,11 @@ ${qualitySuffix}`;
                       const mimeType = image.split(';')[0].split(':')[1];
                       parts.push({ inlineData: { mimeType: mimeType, data: base64Data } });
                     }
-                    if (currentSceneRef) {
-                      const refBase64 = currentSceneRef.split(',')[1];
-                      const refMime = currentSceneRef.split(';')[0].split(':')[1];
+                    currentSceneRefs.forEach(ref => {
+                      const refBase64 = ref.split(',')[1];
+                      const refMime = ref.split(';')[0].split(':')[1];
                       parts.push({ inlineData: { mimeType: refMime, data: refBase64 } });
-                    }
+                    });
                     parts.push({ text: prompt });
 
                     const response = await generateWithRetry(
@@ -1156,16 +1170,18 @@ ${qualitySuffix}`;
   };
 
   const handleSceneRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-     const file = e.target.files?.[0];
-     if (!file) return;
+     const files = e.target.files;
+     if (!files || files.length === 0) return;
 
-     const reader = new FileReader();
-     reader.onloadend = () => {
-       if (reader.result) {
-         setSceneRefImage(reader.result as string);
-       }
-     };
-     reader.readAsDataURL(file as Blob);
+     Array.from(files).forEach(file => {
+       const reader = new FileReader();
+       reader.onloadend = () => {
+         if (reader.result) {
+           setSceneRefImages(prev => [...prev, reader.result as string]);
+         }
+       };
+       reader.readAsDataURL(file as Blob);
+     });
      e.target.value = '';
   };
 
@@ -1180,7 +1196,7 @@ ${qualitySuffix}`;
   };
 
   const handleImageToScene = (imageUrl: string) => {
-    setSceneRefImage(imageUrl);
+    setSceneRefImages(prev => [...prev, imageUrl]);
   };
 
   // Convert remote URL to data URI for drag-drop from kie.ai images
@@ -1225,16 +1241,20 @@ ${qualitySuffix}`;
     const imageData = e.dataTransfer.getData('application/x-lyra-image');
     if (imageData) {
       const dataUri = await fetchImageAsDataUri(imageData);
-      setSceneRefImage(dataUri);
+      setSceneRefImages(prev => [...prev, dataUri]);
       return;
     }
     const files = e.dataTransfer.files;
-    if (files.length > 0 && files[0].type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (reader.result) setSceneRefImage(reader.result as string);
-      };
-      reader.readAsDataURL(files[0]);
+    if (files.length > 0) {
+      Array.from(files).forEach(file => {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (reader.result) setSceneRefImages(prev => [...prev, reader.result as string]);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
     }
   };
 
@@ -1751,31 +1771,31 @@ ${qualitySuffix}`;
         <div className="bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800 transition-all shadow-lg z-30">
           
           {/* Active Color Preview & Pending Images */}
-          {(pendingImages.length > 0 || accentColor || sceneRefImage) && (
+          {(pendingImages.length > 0 || accentColor || sceneRefImages.length > 0) && (
             <div className="max-w-5xl mx-auto px-4 pt-4 pb-0 flex flex-col gap-2">
                
                {/* Pending Images List - Horizontal Scroll */}
-               {(pendingImages.length > 0 || sceneRefImage) && (
+               {(pendingImages.length > 0 || sceneRefImages.length > 0) && (
                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                       {/* Scene Reference Image Preview */}
-                       {sceneRefImage && (
-                           <div className="relative group flex-shrink-0 animate-in slide-in-from-bottom-2 fade-in duration-300">
+                       {/* Scene Reference Images Preview */}
+                       {sceneRefImages.map((refImg, idx) => (
+                           <div key={`scene-${idx}`} className="relative group flex-shrink-0 animate-in slide-in-from-bottom-2 fade-in duration-300" style={{ animationDelay: `${idx * 50}ms` }}>
                                <div className="w-20 h-20 rounded-xl overflow-hidden border-2 border-purple-400 shadow-md bg-white relative">
-                                  <img src={sceneRefImage} alt="Reference" className="w-full h-full object-cover" />
+                                  <img src={refImg} alt={`Scene Ref ${idx + 1}`} className="w-full h-full object-cover" />
                                   <div className="absolute inset-0 bg-purple-500/10 pointer-events-none"></div>
                                </div>
                                <button 
-                                 onClick={() => setSceneRefImage(null)} 
+                                 onClick={() => setSceneRefImages(prev => prev.filter((_, i) => i !== idx))} 
                                  className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full shadow-sm hover:bg-red-600 transition-colors z-10"
                                >
                                   <X size={12} />
                                </button>
-                               <div className="absolute bottom-0 left-0 right-0 bg-purple-600/90 text-[10px] text-white text-center py-0.5 font-medium">场景参考</div>
+                               <div className="absolute bottom-0 left-0 right-0 bg-purple-600/90 text-[10px] text-white text-center py-0.5 font-medium">场景{sceneRefImages.length > 1 ? ` ${idx + 1}` : '参考'}</div>
                            </div>
-                       )}
+                       ))}
 
                        {/* Separator if both exist */}
-                       {sceneRefImage && pendingImages.length > 0 && (
+                       {sceneRefImages.length > 0 && pendingImages.length > 0 && (
                           <div className="w-px bg-slate-300 dark:bg-slate-700 mx-1 h-20 self-center"></div>
                        )}
 
@@ -1858,7 +1878,7 @@ ${qualitySuffix}`;
               {/* Product Upload Input */}
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" multiple className="hidden" />
               {/* Reference Upload Input */}
-              <input type="file" ref={sceneRefInputRef} onChange={handleSceneRefUpload} accept="image/*" className="hidden" />
+              <input type="file" ref={sceneRefInputRef} onChange={handleSceneRefUpload} accept="image/*" multiple className="hidden" />
               
               <div className="flex flex-col gap-2">
                   <button 
@@ -1881,12 +1901,12 @@ ${qualitySuffix}`;
                         onDrop={handleDropOnScene}
                         onDragOver={(e) => { preventDragDefault(e); e.currentTarget.classList.add('ring-2', 'ring-purple-400', 'bg-purple-50'); }}
                         onDragLeave={(e) => { e.currentTarget.classList.remove('ring-2', 'ring-purple-400', 'bg-purple-50'); }}
-                        className={`p-3 rounded-xl transition-all shadow-sm border border-transparent relative ${sceneRefImage ? 'bg-purple-50 text-purple-600 border-purple-200' : 'text-slate-500 hover:text-purple-600 hover:bg-white dark:hover:bg-slate-800 hover:border-slate-200'}`} 
-                        title="上传场景/风格参考图 (可拖拽图片到此)"
+                        className={`p-3 rounded-xl transition-all shadow-sm border border-transparent relative ${sceneRefImages.length > 0 ? 'bg-purple-50 text-purple-600 border-purple-200' : 'text-slate-500 hover:text-purple-600 hover:bg-white dark:hover:bg-slate-800 hover:border-slate-200'}`} 
+                        title="上传场景/风格参考图 (支持多张，可拖拽)"
                        >
                         <ImagePlus size={20} />
-                        {sceneRefImage && (
-                            <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-sm">1</span>
+                        {sceneRefImages.length > 0 && (
+                            <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-sm">{sceneRefImages.length}</span>
                         )}
                       </button>
                   )}
@@ -1898,16 +1918,16 @@ ${qualitySuffix}`;
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
                 onPaste={handlePaste}
-                placeholder={mode === 'master' ? (pendingImages.length > 0 ? (sceneRefImage ? "已就绪：产品 + 场景参考。输入额外调整指令..." : `已就绪 ${pendingImages.length} 张产品图。输入场景描述...`) : "请先上传白底产品图，可选择上传场景参考图...") : "上传图片分析提示词..."}
+                placeholder={mode === 'master' ? (pendingImages.length > 0 ? (sceneRefImages.length > 0 ? `已就绪：产品 + ${sceneRefImages.length}张场景参考。输入额外调整指令...` : `已就绪 ${pendingImages.length} 张产品图。输入场景描述...`) : "请先上传白底产品图，可选择上传场景参考图...") : "上传图片分析提示词..."}
                 className="flex-1 max-h-[50vh] min-h-[160px] py-3 px-2 bg-transparent border-none focus:ring-0 resize-y text-slate-800 dark:text-slate-100 placeholder:text-slate-400 font-medium leading-relaxed custom-scrollbar"
                 rows={6}
               />
-              {(inputText || pendingImages.length > 0 || sceneRefImage) && (
+              {(inputText || pendingImages.length > 0 || sceneRefImages.length > 0) && (
                 <button 
                   onClick={() => {
                     setInputText('');
                     setPendingImages([]);
-                    setSceneRefImage(null);
+                    setSceneRefImages([]);
                   }}
                   className="p-3 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
                   title="清空所有输入"
