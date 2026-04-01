@@ -253,7 +253,10 @@ export default function App() {
         const hasSelected = await window.aistudio.hasSelectedApiKey();
         setHasApiKey(hasSelected);
       } else {
-        setHasApiKey(true);
+        // Check if user has a saved API key or .env key
+        const savedKey = localStorage.getItem('lyra_api_key') || '';
+        const envKey = process.env.API_KEY || '';
+        setHasApiKey(!!(savedKey || envKey));
       }
     };
     checkApiKey();
@@ -910,49 +913,96 @@ You MUST structure your response exactly as follows:
                 // --- Master Mode ---
                 let prompt = "";
 
+                // Helper: detect if user mentioned perspective/angle keywords
+                const userInput = currentInput || "";
+                const hasPerspectiveHint = /透视|视角|俯视|仰视|平视|侧视|鸟瞰|低角度|高角度|正面|背面|45度|90度|top.?down|bird.?eye|low.?angle|high.?angle|eye.?level|front.?view|side.?view|aerial|isometric|perspective|angle|overhead/i.test(userInput);
+                const hasQualityHint = /画质|质感|水彩|油画|插画|卡通|动漫|手绘|素描|像素|风格化|abstract|watercolor|oil.?paint|cartoon|anime|illustration|sketch|pixel|stylized|flat.?design|minimalist.?art/i.test(userInput);
+
+                // Default photorealistic quality suffix (only if user didn't specify quality style)
+                const qualitySuffix = hasQualityHint 
+                  ? "" 
+                  : "\n\nPHOTO QUALITY: Shot on Sony A7R V with 85mm f/1.4 GM lens. Natural ambient lighting with soft fill. RAW-quality color depth, fine grain texture, true-to-life skin tones and material rendering. 8K resolution, professional color grading. The final image must be indistinguishable from a real professional photograph.";
+
                 // 3. Construct Prompt based on inputs
                 if (image && currentSceneRef) {
-                    prompt = `You are an expert commercial photographer and CGI artist.
-                    
-                    INPUTS:
-                    - Image 1: THE PRODUCT. (You must keep its shape, texture, material, and details 100% authentic).
-                    - Image 2: THE SCENE REFERENCE. (This dictates the environment style, lighting mood, background elements, and composition vibe).
-                    
-                    TASK:
-                    Create a high-quality product photography composite. 
-                    Place the Product (Image 1) into a scene that perfectly replicates the style and environment of the Reference (Image 2).
-                    
-                    DETAILS:
-                    - The generated scene must look like it belongs to the same set as Image 2.
-                    - Lighting on the product must match the lighting direction and softness/hardness of Image 2.
-                    - Perspective of the product must be adjusted to sit naturally in the new scene.
-                    - ${currentInput || "Ensure a seamless and photorealistic integration."}
-                    ${colorContext}`;
+                    // 场景参考 + 产品图：替换场景中的产品为上传的产品
+                    prompt = `You are an elite commercial photographer and compositing specialist.
+
+INPUTS:
+- Image 1: THE PRODUCT (absolute source of truth for product appearance — shape, texture, material, color, branding must be preserved with 100% fidelity).
+- Image 2: THE SCENE REFERENCE (defines the target environment, lighting, composition, and camera angle).
+
+PRIMARY TASK — PRODUCT REPLACEMENT:
+Replace any existing product/object in the Scene Reference (Image 2) with the Product (Image 1). 
+The Product must be seamlessly composited into the exact position and scale where the original product was in the scene.
+
+PERSPECTIVE RULES:
+${hasPerspectiveHint 
+  ? `- The user has specified a camera angle: "${userInput}". Follow this angle PRECISELY for the final composite.` 
+  : `- Match the EXACT camera angle and perspective of the Scene Reference (Image 2). The Product must be re-rendered from the same viewing angle as the scene.`}
+
+COMPOSITING REQUIREMENTS:
+- Lighting direction, intensity, color temperature must match Image 2 exactly.
+- Cast shadows and reflections must be physically accurate for the scene's light sources.
+- Depth of field and focus plane must match Image 2.
+- Surface interactions (reflections on tables, soft shadows on fabric, etc.) must be realistic.
+- ${userInput || "Ensure a seamless, photorealistic integration where the product looks native to the scene."}
+${colorContext}${qualitySuffix}`;
+
+                } else if (currentSceneRef && !image) {
+                    // 只有场景参考图，无产品图：透视角度转换
+                    prompt = `You are an expert 3D scene reconstruction and camera perspective specialist.
+
+INPUT:
+- Image 1: THE SCENE (a reference scene/environment photograph).
+
+TASK — PERSPECTIVE TRANSFORMATION:
+${hasPerspectiveHint
+  ? `Transform/re-render this scene from the following camera angle as specified by the user: "${userInput}". 
+Reconstruct the 3D space of the scene and re-project it from the requested viewpoint with accurate parallax, occlusion, and foreshortening.`
+  : `${userInput || "Re-render this scene with enhanced composition and lighting."}`}
+
+REQUIREMENTS:
+- Maintain all scene elements (furniture, objects, materials, textures, colors) with full fidelity.
+- Lighting must be physically re-calculated for the new viewpoint.
+- Hidden areas revealed by the new angle should be filled with contextually appropriate content.
+- Architectural lines and vanishing points must be geometrically correct.
+${colorContext}${qualitySuffix}`;
 
                 } else if (image) {
+                    // 只有产品图：分析透视并构建场景
                     prompt = `You are an expert product photographer and visual designer.
-                    
-                    TASK:
-                    1. **Analyze Perspective**: Determine the camera angle of the input product.
-                    2. **Scene Construction**: Generate a high-quality interior scene that STRICTLY MATCHES this perspective.
-                    3. **Product Integration**: Place the product naturally in this scene. STRICTLY PRESERVE the product's appearance.
-                    
-                    SCENE DESCRIPTION:
-                    ${currentInput || "A modern, high-end interior setting that complements the product's style. Soft natural lighting."}
-                    ${colorContext}
-                    
-                    REQUIREMENTS:
-                    - Perspective consistency is the #1 priority.
-                    - Realistic shadows and lighting interaction.
-                    - High resolution, photorealistic, 8k quality.`;
+
+INPUT:
+- Image 1: THE PRODUCT (preserve its shape, texture, material, branding, and every visual detail with 100% accuracy).
+
+TASK:
+1. **Analyze Product Perspective**: Identify the exact camera angle, focal length, and viewing direction of the product in Image 1.
+2. **Scene Construction**: Generate a complete environment/scene.
+3. **Product Integration**: Place the product naturally into the generated scene.
+
+PERSPECTIVE RULES:
+${hasPerspectiveHint
+  ? `- The user has specified a desired camera angle: "${userInput}". Generate the scene AND re-render the product from this specific viewpoint.`
+  : `- STRICTLY maintain the original camera angle detected from the product image. The generated scene must match this exact perspective — same vanishing points, same horizon line, same focal length feel.`}
+
+SCENE DESCRIPTION:
+${userInput || "A modern, high-end interior or commercial setting that naturally complements the product's category and style. Soft, directional natural lighting from a large window source."}
+${colorContext}
+
+INTEGRATION REQUIREMENTS:
+- Product must cast realistic shadows consistent with the scene's light sources.
+- Scale must be physically accurate relative to surrounding objects.
+- Material reflections and surface interactions must be realistic.
+${qualitySuffix}`;
 
                 } else {
-                    prompt = `Generate a high-quality, photorealistic interior design image based on this description: 
-                    
-                    ${currentInput}
-                    ${colorContext}
-                    
-                    Style: Professional Architectural Photography, 8k, highly detailed.`;
+                    // 纯文生图：无产品无场景参考
+                    prompt = `Generate a professional-grade image based on this description:
+
+${userInput}
+${colorContext}
+${qualitySuffix}`;
                 }
 
                 // Add "Thinking" message
@@ -1240,28 +1290,145 @@ You MUST structure your response exactly as follows:
   // Helper to extract generated images for the sidebar gallery (limit to last 20 to prevent memory overflow)
   const generatedImages = messages.filter(m => m.type === 'image' && m.role === 'assistant').slice(-20);
 
+  // Settings modal JSX (shared between gate page and main app)
+  const settingsModalJsx = showSettingsModal ? (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-md border border-slate-200 dark:border-slate-800">
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+                        <Settings size={20} className="text-indigo-500"/> API Configuration
+                    </h3>
+                    
+                    <div className="space-y-4">
+                        {/* Provider Selection */}
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">API Provider</label>
+                            <div className="grid grid-cols-3 gap-2">
+                                <button onClick={() => handleProviderChange('google')} className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-xs font-medium ${apiProvider === 'google' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-600' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'}`}>
+                                    <Sparkles size={18}/> Google AI
+                                </button>
+                                <button onClick={() => handleProviderChange('kie')} className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-xs font-medium ${apiProvider === 'kie' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-600' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'}`}>
+                                    <Cloud size={18}/> Kie.ai
+                                </button>
+                                <button onClick={() => handleProviderChange('custom')} className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-xs font-medium ${apiProvider === 'custom' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-600' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'}`}>
+                                    <Layers size={18}/> Custom Proxy
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Provider-specific settings - keyed to force full remount */}
+                        <div key={apiProvider}>
+                            {apiProvider === 'custom' && (
+                                <div className="mb-4">
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                                        Proxy Base URL
+                                    </label>
+                                    <input 
+                                        type="text"
+                                        value={apiBaseUrl}
+                                        onChange={(e) => setApiBaseUrl(e.target.value)}
+                                        placeholder="https://your-proxy.example.com/v1beta"
+                                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    />
+                                    <p className="text-[10px] text-slate-400 mt-1">Enter the base URL of your third-party proxy</p>
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                                    API Key {apiProvider === 'google' ? '(Optional Override)' : ''}
+                                </label>
+                                <input 
+                                    type="password"
+                                    value={userApiKey}
+                                    onChange={(e) => setUserApiKey(e.target.value)}
+                                    placeholder={apiProvider === 'google' ? 'Starts with AIza... (leave empty to use .env key)' : 'Enter your API key'}
+                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                />
+                                <p className="text-[10px] text-slate-400 mt-1">
+                                    {apiProvider === 'google' ? 'Leave empty to use .env key' : apiProvider === 'kie' ? 'Enter your api.kie.ai API key' : 'Enter your API key'}
+                                </p>
+                            </div>
+
+                            {/* 文本模型选择 */}
+                            <div className="mt-4">
+                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">📝 文本分析模型 (提示词架构师)</label>
+                                <select
+                                    value={selectedTextModel}
+                                    onChange={(e) => setSelectedTextModel(e.target.value)}
+                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-white"
+                                >
+                                    {textModelOptions.map(m => (
+                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))}
+                                </select>
+                                <p className="text-[10px] text-slate-400 mt-1">用于「提示词架构师」模式的文本解析</p>
+                            </div>
+
+                            {/* 图像模型选择 */}
+                            <div className="mt-4">
+                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">🎨 图像生成模型 (生图/重绘/扩展)</label>
+                                <select
+                                    value={selectedImageModel}
+                                    onChange={(e) => setSelectedImageModel(e.target.value)}
+                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-white"
+                                >
+                                    {imageModelOptions.map(m => (
+                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))}
+                                </select>
+                                <p className="text-[10px] text-slate-400 mt-1">用于「生图大师」、局部重绘、图像扩展等功能</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 mt-6">
+                        <button 
+                            onClick={() => setShowSettingsModal(false)}
+                            className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            onClick={() => {
+                                localStorage.setItem('lyra_api_key', userApiKey);
+                                localStorage.setItem('lyra_api_base_url', apiBaseUrl);
+                                localStorage.setItem('lyra_api_provider', apiProvider);
+                                localStorage.setItem('lyra_text_model', selectedTextModel);
+                                localStorage.setItem('lyra_image_model', selectedImageModel);
+                                const envKey = process.env.API_KEY || '';
+                                setHasApiKey(!!(userApiKey || envKey));
+                                setShowSettingsModal(false);
+                                alert('Settings saved!');
+                            }}
+                            className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm transition-all"
+                        >
+                            Save Settings
+                        </button>
+                    </div>
+                </div>
+            </div>
+  ) : null;
+
   if (!hasApiKey) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-slate-50 dark:bg-slate-900">
+      <div className="flex h-screen w-full items-center justify-center bg-slate-50 dark:bg-slate-900 relative">
         <div className="text-center p-8 bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-md mx-4">
           <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
              <Key size={32} />
           </div>
           <h2 className="text-2xl font-bold text-slate-800 dark:text-white mb-2">需要 API Key 授权</h2>
           <p className="text-slate-500 dark:text-slate-400 mb-6">
-            使用 Gemini 3.0 Pro 系列模型需要您连接 Google Cloud 项目并选择付费 API Key。
+            请先在设置中填写 API Key 才能使用 Lyra Studio 的所有功能。
           </p>
           <button 
-            onClick={handleSelectApiKey}
+            onClick={() => setShowSettingsModal(true)}
             className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl transition-all shadow-lg hover:shadow-indigo-500/25 flex items-center justify-center gap-2"
           >
-            <Key size={18} />
-            选择 API Key
+            <Settings size={18} />
+            打开设置
           </button>
-          <div className="mt-4 text-xs text-slate-400">
-            <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="underline hover:text-indigo-500">了解更多关于计费的信息</a>
-          </div>
         </div>
+        {settingsModalJsx}
       </div>
     );
   }
@@ -1535,121 +1702,7 @@ You MUST structure your response exactly as follows:
         )}
 
         {/* Settings Modal */}
-        {showSettingsModal && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-                <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-md border border-slate-200 dark:border-slate-800">
-                    <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
-                        <Settings size={20} className="text-indigo-500"/> API Configuration
-                    </h3>
-                    
-                    <div className="space-y-4">
-                        {/* Provider Selection */}
-                        <div>
-                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">API Provider</label>
-                            <div className="grid grid-cols-3 gap-2">
-                                <button onClick={() => handleProviderChange('google')} className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-xs font-medium ${apiProvider === 'google' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-600' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'}`}>
-                                    <Sparkles size={18}/> Google AI
-                                </button>
-                                <button onClick={() => handleProviderChange('kie')} className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-xs font-medium ${apiProvider === 'kie' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-600' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'}`}>
-                                    <Cloud size={18}/> Kie.ai
-                                </button>
-                                <button onClick={() => handleProviderChange('custom')} className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-xs font-medium ${apiProvider === 'custom' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-600' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'}`}>
-                                    <Layers size={18}/> Custom Proxy
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Provider-specific settings - keyed to force full remount */}
-                        <div key={apiProvider}>
-                            {apiProvider === 'custom' && (
-                                <div className="mb-4">
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                                        Proxy Base URL
-                                    </label>
-                                    <input 
-                                        type="text"
-                                        value={apiBaseUrl}
-                                        onChange={(e) => setApiBaseUrl(e.target.value)}
-                                        placeholder="https://your-proxy.example.com/v1beta"
-                                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                                    />
-                                    <p className="text-[10px] text-slate-400 mt-1">Enter the base URL of your third-party proxy</p>
-                                </div>
-                            )}
-
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                                    API Key {apiProvider === 'google' ? '(Optional Override)' : ''}
-                                </label>
-                                <input 
-                                    type="password"
-                                    value={userApiKey}
-                                    onChange={(e) => setUserApiKey(e.target.value)}
-                                    placeholder={apiProvider === 'google' ? 'Starts with AIza... (leave empty to use .env key)' : 'Enter your API key'}
-                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                                />
-                                <p className="text-[10px] text-slate-400 mt-1">
-                                    {apiProvider === 'google' ? 'Leave empty to use .env key' : apiProvider === 'kie' ? 'Enter your api.kie.ai API key' : 'Enter your API key'}
-                                </p>
-                            </div>
-
-                            {/* 文本模型选择 */}
-                            <div className="mt-4">
-                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">📝 文本分析模型 (提示词架构师)</label>
-                                <select
-                                    value={selectedTextModel}
-                                    onChange={(e) => setSelectedTextModel(e.target.value)}
-                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-white"
-                                >
-                                    {textModelOptions.map(m => (
-                                        <option key={m.id} value={m.id}>{m.name}</option>
-                                    ))}
-                                </select>
-                                <p className="text-[10px] text-slate-400 mt-1">用于「提示词架构师」模式的文本解析</p>
-                            </div>
-
-                            {/* 图像模型选择 */}
-                            <div className="mt-4">
-                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">🎨 图像生成模型 (生图/重绘/扩展)</label>
-                                <select
-                                    value={selectedImageModel}
-                                    onChange={(e) => setSelectedImageModel(e.target.value)}
-                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-white"
-                                >
-                                    {imageModelOptions.map(m => (
-                                        <option key={m.id} value={m.id}>{m.name}</option>
-                                    ))}
-                                </select>
-                                <p className="text-[10px] text-slate-400 mt-1">用于「生图大师」、局部重绘、图像扩展等功能</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="flex justify-end gap-3 mt-6">
-                        <button 
-                            onClick={() => setShowSettingsModal(false)}
-                            className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                        >
-                            Cancel
-                        </button>
-                        <button 
-                            onClick={() => {
-                                localStorage.setItem('lyra_api_key', userApiKey);
-                                localStorage.setItem('lyra_api_base_url', apiBaseUrl);
-                                localStorage.setItem('lyra_api_provider', apiProvider);
-                                localStorage.setItem('lyra_text_model', selectedTextModel);
-                                localStorage.setItem('lyra_image_model', selectedImageModel);
-                                setShowSettingsModal(false);
-                                alert('Settings saved!');
-                            }}
-                            className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm transition-all"
-                        >
-                            Save Settings
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
+        {settingsModalJsx}
 
         {/* Chat Area */}
         <div className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth">
