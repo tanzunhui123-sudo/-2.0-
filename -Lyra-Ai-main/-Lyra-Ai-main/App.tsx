@@ -33,6 +33,8 @@ export default function App() {
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   // New state for Scene Reference Images (supports multiple)
   const [sceneRefImages, setSceneRefImages] = useState<string[]>([]);
+  // Number of images to generate (Master mode)
+  const [generateCount, setGenerateCount] = useState(1);
   
   const [hasApiKey, setHasApiKey] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
@@ -788,8 +790,11 @@ export default function App() {
     }
 
     // --- 2. Define Generation Logic ---
-    // If no images, we execute once with null image. If images, we execute for EACH image (Concurrent/Batch).
-    const tasks = currentImages.length > 0 ? currentImages : [null];
+    // Master mode: all product images are combined as reference, generate `generateCount` images.
+    // Architect mode: one task per image for individual analysis.
+    const tasks: (string | null)[] = mode === 'master'
+      ? Array.from({ length: generateCount }, () => null)
+      : (currentImages.length > 0 ? currentImages : [null]);
     
     setActiveRequests(prev => prev + tasks.length);
     if (progress > 90) setProgress(50); 
@@ -914,6 +919,9 @@ You MUST structure your response exactly as follows:
 
             } else {
                 // --- Master Mode ---
+                // In master mode, use ALL product images as combined reference
+                const hasProduct = currentImages.length > 0;
+                const productCount = currentImages.length;
                 let prompt = "";
 
                 // Helper: detect if user mentioned perspective/angle keywords
@@ -928,22 +936,26 @@ You MUST structure your response exactly as follows:
 
                 // 3. Construct Prompt based on inputs
                 const sceneRefCount = currentSceneRefs.length;
-                if (image && currentSceneRef) {
-                    // 场景参考 + 产品图：替换场景中的产品为上传的产品
+                if (hasProduct && currentSceneRef) {
+                    // 场景参考 + 产品图：多张产品图作为参考，生成一张合成图
+                    const productInputDesc = productCount > 1
+                      ? `- Images 1-${productCount}: THE PRODUCT (${productCount} reference images showing different angles/views of the SAME product. Analyze ALL images together to understand the product's complete 3D form, texture, material, color, and branding. Preserve with 100% fidelity.)`
+                      : `- Image 1: THE PRODUCT (absolute source of truth for product appearance — shape, texture, material, color, branding must be preserved with 100% fidelity).`;
+                    const sceneStartIdx = productCount + 1;
                     const sceneInputDesc = sceneRefCount > 1
-                      ? `- Images 2-${1 + sceneRefCount}: SCENE REFERENCES (${sceneRefCount} reference images defining the target environment, lighting style, composition, and camera angle. Synthesize the best elements from all references.)`
-                      : `- Image 2: THE SCENE REFERENCE (defines the target environment, lighting, composition, and camera angle).`;
+                      ? `- Images ${sceneStartIdx}-${productCount + sceneRefCount}: SCENE REFERENCES (${sceneRefCount} reference images defining the target environment, lighting style, composition, and camera angle. Synthesize the best elements from all references.)`
+                      : `- Image ${sceneStartIdx}: THE SCENE REFERENCE (defines the target environment, lighting, composition, and camera angle).`;
 
                     prompt = `You are an elite commercial photographer and compositing specialist.
 
 INPUTS:
-- Image 1: THE PRODUCT (absolute source of truth for product appearance — shape, texture, material, color, branding must be preserved with 100% fidelity).
+${productInputDesc}
 ${sceneInputDesc}
 
 PRIMARY TASK — PRODUCT REPLACEMENT:
-${sceneRefCount > 1 
+${productCount > 1 ? `Analyze ALL ${productCount} product reference images together to build a complete understanding of the product's form and details. ` : ''}${sceneRefCount > 1 
   ? `Analyze all ${sceneRefCount} scene references to understand the desired environment style, lighting, and composition. Create a unified scene that combines the best elements from all references, then seamlessly composite the Product into this scene.`
-  : `Replace any existing product/object in the Scene Reference (Image 2) with the Product (Image 1). 
+  : `Replace any existing product/object in the Scene Reference with the Product. 
 The Product must be seamlessly composited into the exact position and scale where the original product was in the scene.`}
 
 PERSPECTIVE RULES:
@@ -959,7 +971,7 @@ COMPOSITING REQUIREMENTS:
 - ${userInput || "Ensure a seamless, photorealistic integration where the product looks native to the scene."}
 ${colorContext}${qualitySuffix}`;
 
-                } else if (currentSceneRef && !image) {
+                } else if (currentSceneRef && !hasProduct) {
                     // 只有场景参考图，无产品图：透视角度转换
                     const sceneInputLabel = sceneRefCount > 1
                       ? `- Images 1-${sceneRefCount}: SCENE REFERENCES (${sceneRefCount} reference scene photographs — synthesize their environment, style, and composition).`
@@ -983,12 +995,15 @@ REQUIREMENTS:
 - Architectural lines and vanishing points must be geometrically correct.
 ${colorContext}${qualitySuffix}`;
 
-                } else if (image) {
-                    // 只有产品图：分析透视并构建场景
+                } else if (hasProduct) {
+                    // 只有产品图：分析透视并构建场景（多张产品图综合参考）
+                    const productInputLabel = productCount > 1
+                      ? `- Images 1-${productCount}: THE PRODUCT (${productCount} reference images showing different angles/views of the SAME product. Analyze ALL images together to fully understand the product's 3D form, texture, material, color, and branding. Preserve with 100% accuracy.)`
+                      : `- Image 1: THE PRODUCT (preserve its shape, texture, material, branding, and every visual detail with 100% accuracy).`;
                     prompt = `You are an expert product photographer and visual designer.
 
 INPUT:
-- Image 1: THE PRODUCT (preserve its shape, texture, material, branding, and every visual detail with 100% accuracy).
+${productInputLabel}
 
 TASK:
 1. **Analyze Product Perspective**: Identify the exact camera angle, focal length, and viewing direction of the product in Image 1.
@@ -1021,12 +1036,12 @@ ${qualitySuffix}`;
 
                 // Add "Thinking" message
                 let thinkingMsg = "🎨 正在生成...";
-                if (image && currentSceneRef) {
-                    thinkingMsg = `🎨 [图 ${taskIndex + 1}] 正在参考场景风格复刻并植入产品...`;
-                } else if (image) {
-                    thinkingMsg = `🎨 [图 ${taskIndex + 1}] 正在解析产品透视并构建场景...`;
+                if (hasProduct && currentSceneRef) {
+                    thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在参考${productCount}张产品图和场景风格复刻并植入产品...`;
+                } else if (hasProduct) {
+                    thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在解析${productCount}张产品图透视并构建场景...`;
                 } else {
-                    thinkingMsg = "🎨 正在根据描述生成效果图...";
+                    thinkingMsg = generateCount > 1 ? `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在生成效果图...` : "🎨 正在根据描述生成效果图...";
                 }
                 if (apiProvider === 'kie') {
                     thinkingMsg += ' (kie.ai 异步生成中，请稍候...)';
@@ -1044,8 +1059,7 @@ ${qualitySuffix}`;
 
                 if (apiProvider === 'kie') {
                     // === Kie.ai image generation ===
-                    const inputImages: string[] = [];
-                    if (image) inputImages.push(image);
+                    const inputImages: string[] = [...currentImages];
                     currentSceneRefs.forEach(ref => inputImages.push(ref));
 
                     generatedImageUrl = await kieGenerateImage(prompt, inputImages, {
@@ -1053,13 +1067,13 @@ ${qualitySuffix}`;
                         resolution: resolution
                     });
                 } else {
-                    // === Google SDK ===
+                    // === Google SDK (Master Mode) ===
                     const parts: any[] = [];
-                    if (image) {
-                      const base64Data = image.split(',')[1];
-                      const mimeType = image.split(';')[0].split(':')[1];
+                    currentImages.forEach(img => {
+                      const base64Data = img.split(',')[1];
+                      const mimeType = img.split(';')[0].split(':')[1];
                       parts.push({ inlineData: { mimeType: mimeType, data: base64Data } });
-                    }
+                    });
                     currentSceneRefs.forEach(ref => {
                       const refBase64 = ref.split(',')[1];
                       const refMime = ref.split(';')[0].split(':')[1];
@@ -1862,6 +1876,14 @@ ${qualitySuffix}`;
                     <div className="flex gap-1">
                         {RESOLUTIONS.map((res) => (
                           <button key={res} onClick={() => setResolution(res)} className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium ${resolution === res ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}>{res}</button>
+                        ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                    <div className="px-2 text-slate-400 flex items-center gap-1"><Layers size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">生成</span></div>
+                    <div className="flex gap-1">
+                        {[1, 2, 3, 4].map((count) => (
+                          <button key={count} onClick={() => setGenerateCount(count)} className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium ${generateCount === count ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}>{count}张</button>
                         ))}
                     </div>
                   </div>
