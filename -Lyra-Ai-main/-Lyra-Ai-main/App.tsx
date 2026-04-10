@@ -767,7 +767,9 @@ export default function App() {
 
     // Add text to chat (once)
     let displayPrompt = inputText;
-    if (sceneRefImages.length > 0 && pendingImages.length > 0) {
+    if (mode === 'reskin' && pendingImages.length > 0 && sceneRefImages.length > 0) {
+        displayPrompt = `[换色换料] ${inputText}`;
+    } else if (sceneRefImages.length > 0 && pendingImages.length > 0) {
         displayPrompt = `[参考场景复刻] ${inputText}`;
     }
     
@@ -783,7 +785,7 @@ export default function App() {
     const colorContext = accentColor ? `\n\nDESIGN CONSTRAINT: Use the color ${accentColor} as a primary accent or dominant tone.` : '';
     
     // Reset Input State logic:
-    if (mode !== 'master') {
+    if (mode !== 'master' && mode !== 'reskin') {
         setInputText('');
         setPendingImages([]);
         setSceneRefImages([]);
@@ -791,8 +793,9 @@ export default function App() {
 
     // --- 2. Define Generation Logic ---
     // Master mode: all product images are combined as reference, generate `generateCount` images.
+    // Reskin mode: similar to master but for color/material replacement.
     // Architect mode: one task per image for individual analysis.
-    const tasks: (string | null)[] = mode === 'master'
+    const tasks: (string | null)[] = (mode === 'master' || mode === 'reskin')
       ? Array.from({ length: generateCount }, () => null)
       : (currentImages.length > 0 ? currentImages : [null]);
     
@@ -916,6 +919,152 @@ You MUST structure your response exactly as follows:
                   type: 'text', 
                   content: responseText || "解析失败，未能生成内容。"
                 });
+
+            } else if (mode === 'reskin') {
+                // --- Reskin Mode (换色换料) ---
+                const hasOriginal = currentImages.length > 0;
+                const hasMaterialRef = currentSceneRefs.length > 0;
+                const userInput = currentInput || "";
+
+                const qualitySuffix = "\n\nPHOTO QUALITY: Shot on Sony A7R V with 85mm f/1.4 GM lens. Natural ambient lighting with soft fill. RAW-quality color depth, fine grain texture, true-to-life material rendering. 8K resolution, professional color grading. The final image must be indistinguishable from a real professional photograph.";
+
+                let prompt = "";
+
+                if (hasOriginal && hasMaterialRef) {
+                    // 有原图 + 面料/颜色参考图
+                    prompt = `You are an expert product material and color replacement specialist.
+
+INPUTS:
+- Image 1: THE ORIGINAL PRODUCT IMAGE (this is the source image — preserve its exact composition, camera angle, lighting, background, shadows, and all scene elements EXACTLY as they are. Only the product's surface material/color/texture should change).
+- Image 2: THE MATERIAL/COLOR REFERENCE (this image shows the TARGET color, fabric, texture, or material pattern that should be applied to the product in Image 1).
+
+${userInput ? `USER INSTRUCTIONS: "${userInput}" — Read carefully and follow precisely. The user may specify which part of the product to change, or provide additional details.` : ''}
+
+PRIMARY TASK — MATERIAL/COLOR REPLACEMENT:
+Replace ONLY the surface material, color, fabric, or texture of the main product/subject in Image 1 with the material/color/texture shown in Image 2.
+
+Step 1: ANALYZE THE ORIGINAL IMAGE
+- Identify the main product/subject in Image 1
+- Map out which surfaces belong to the product (upholstery, fabric panels, leather surfaces, painted surfaces, etc.)
+- Note the exact camera angle, lighting direction, shadow patterns, background, and surrounding elements
+
+Step 2: ANALYZE THE MATERIAL REFERENCE
+- Extract the target color, hue, saturation, and brightness from Image 2
+- Identify the material type (fabric, leather, velvet, linen, wood grain, metal finish, etc.)
+- Note the texture pattern, weave, grain direction, and surface characteristics
+
+Step 3: APPLY THE REPLACEMENT
+- Replace the product's surface material/color/texture with the reference material
+- The material must wrap naturally around the product's 3D form, following its contours and seams
+- Texture scale must be realistic relative to the product's size
+- Lighting interactions must be recalculated: different materials reflect light differently (matte fabric vs glossy leather vs textured linen)
+- Shadows, creases, and folds in the fabric must look natural for the new material type
+
+CRITICAL RULES:
+- DO NOT change the product's shape, size, silhouette, or proportions
+- DO NOT change the camera angle, composition, or framing
+- DO NOT change the background, surrounding objects, or any non-product elements
+- DO NOT change structural elements like legs, frames, buttons, zippers, or hardware — only the surface material/fabric/color
+- Preserve all seam lines, stitching patterns, and construction details — just change the material covering them
+- The lighting and shadow response must be physically accurate for the new material type
+${userInput ? `\nADDITIONAL USER REQUIREMENTS: ${userInput}` : ''}
+${qualitySuffix}`;
+                } else if (hasOriginal && !hasMaterialRef) {
+                    // 只有原图，没有面料参考 — 根据文字描述换色
+                    prompt = `You are an expert product material and color replacement specialist.
+
+INPUT:
+- Image 1: THE ORIGINAL PRODUCT IMAGE (preserve its exact composition, camera angle, lighting, background, shadows, and all scene elements. Only change the product's surface material/color).
+
+TASK:
+${userInput ? `The user requests: "${userInput}". Apply this color/material change to the main product in the image.` : 'Please describe the target color or material you want to apply.'}
+
+RULES:
+- Replace ONLY the product's surface color/material/texture as described
+- DO NOT change shape, size, composition, background, camera angle, or non-product elements
+- Preserve structural elements (legs, frames, hardware) — only change surface covering
+- Lighting and shadow response must be recalculated for the new material
+${qualitySuffix}`;
+                } else {
+                    prompt = `请上传要换色的产品原图，以及目标颜色/面料的参考图。`;
+                }
+
+                // Thinking message
+                let thinkingMsg = "🎨 正在换色换料处理中...";
+                if (hasOriginal && hasMaterialRef) {
+                    thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在参考面料/颜色替换产品材质...`;
+                } else if (hasOriginal) {
+                    thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在根据描述替换产品颜色/材质...`;
+                }
+                if (apiProvider === 'kie') {
+                    thinkingMsg += ' (kie.ai 异步生成中，请稍候...)';
+                }
+
+                addMessage({ 
+                   id: baseId, 
+                   role: 'assistant', 
+                   type: 'text', 
+                   content: thinkingMsg
+                });
+
+                let generatedImageUrl: string | null = null;
+                let textResponse: string = "";
+
+                if (apiProvider === 'kie') {
+                    const inputImages: string[] = [...currentImages];
+                    currentSceneRefs.forEach(ref => inputImages.push(ref));
+                    generatedImageUrl = await kieGenerateImage(prompt, inputImages, {
+                        aspectRatio: aspectRatio,
+                        resolution: resolution
+                    });
+                } else {
+                    const parts: any[] = [];
+                    currentImages.forEach(img => {
+                      const base64Data = img.split(',')[1];
+                      const mimeType = img.split(';')[0].split(':')[1];
+                      parts.push({ inlineData: { mimeType: mimeType, data: base64Data } });
+                    });
+                    currentSceneRefs.forEach(ref => {
+                      const refBase64 = ref.split(',')[1];
+                      const refMime = ref.split(';')[0].split(':')[1];
+                      parts.push({ inlineData: { mimeType: refMime, data: refBase64 } });
+                    });
+                    parts.push({ text: prompt });
+
+                    const response = await generateWithRetry(
+                        selectedImageModel,
+                        {
+                            contents: { parts },
+                            config: {
+                                imageConfig: {
+                                    aspectRatio: aspectRatio,
+                                    imageSize: resolution 
+                                }
+                            }
+                        }
+                    );
+
+                    if (response?.candidates?.[0]?.content?.parts) {
+                        for (const part of response.candidates[0].content.parts) {
+                            if (part.inlineData) {
+                                generatedImageUrl = `data:image/png;base64,${part.inlineData.data}`;
+                            } else if (part.text) {
+                                textResponse = part.text;
+                            }
+                        }
+                    }
+                }
+
+                // Update thinking message with result
+                if (generatedImageUrl) {
+                    addMessage({ id: baseId + 1, role: 'assistant', type: 'image', content: generatedImageUrl });
+                }
+                if (textResponse) {
+                    addMessage({ id: baseId + 2, role: 'assistant', type: 'text', content: textResponse });
+                }
+                if (!generatedImageUrl && !textResponse) {
+                    addMessage({ id: baseId + 1, role: 'assistant', type: 'text', content: "⚠️ 换色换料生成失败,请重试。" });
+                }
 
             } else {
                 // --- Master Mode ---
@@ -1513,6 +1662,9 @@ ${qualitySuffix}`;
               <button onClick={() => setMode('master')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${mode === 'master' ? 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 shadow-sm ring-1 ring-purple-200 dark:ring-purple-700' : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-400'}`}>
                 <Wind size={20} /><div className="text-left hidden md:block"><div className="font-medium text-sm">生图大师</div><div className="text-xs opacity-70">Generation Master</div></div>
               </button>
+              <button onClick={() => setMode('reskin')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${mode === 'reskin' ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 shadow-sm ring-1 ring-amber-200 dark:ring-amber-700' : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-400'}`}>
+                <Palette size={20} /><div className="text-left hidden md:block"><div className="font-medium text-sm">换色换料</div><div className="text-xs opacity-70">Reskin Studio</div></div>
+              </button>
             </div>
 
             {/* Google Drive Sync Section */}
@@ -1715,7 +1867,7 @@ ${qualitySuffix}`;
         {/* Mobile Header */}
         <div className="md:hidden h-16 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 z-10">
            <div className="flex items-center gap-2 font-bold text-indigo-600"><Sparkles size={20} /><span>Lyra</span></div>
-           <button onClick={() => setMode(mode === 'architect' ? 'master' : 'architect')} className="text-xs bg-slate-100 px-3 py-1 rounded-full">{mode === 'architect' ? 'Architect' : 'Master'}</button>
+           <button onClick={() => setMode(mode === 'architect' ? 'master' : mode === 'master' ? 'reskin' : 'architect')} className="text-xs bg-slate-100 px-3 py-1 rounded-full">{mode === 'architect' ? 'Architect' : mode === 'master' ? 'Master' : 'Reskin'}</button>
         </div>
 
         {/* Client ID Input Modal */}
@@ -1817,12 +1969,12 @@ ${qualitySuffix}`;
                {/* Pending Images List - Horizontal Scroll */}
                {(pendingImages.length > 0 || sceneRefImages.length > 0) && (
                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                       {/* Scene Reference Images Preview */}
+                       {/* Scene/Material Reference Images Preview */}
                        {sceneRefImages.map((refImg, idx) => (
                            <div key={`scene-${idx}`} className="relative group flex-shrink-0 animate-in slide-in-from-bottom-2 fade-in duration-300" style={{ animationDelay: `${idx * 50}ms` }}>
-                               <div className="w-20 h-20 rounded-xl overflow-hidden border-2 border-purple-400 shadow-md bg-white relative">
-                                  <img src={refImg} alt={`Scene Ref ${idx + 1}`} className="w-full h-full object-cover" />
-                                  <div className="absolute inset-0 bg-purple-500/10 pointer-events-none"></div>
+                               <div className={`w-20 h-20 rounded-xl overflow-hidden border-2 ${mode === 'reskin' ? 'border-amber-400' : 'border-purple-400'} shadow-md bg-white relative`}>
+                                  <img src={refImg} alt={`Ref ${idx + 1}`} className="w-full h-full object-cover" />
+                                  <div className={`absolute inset-0 ${mode === 'reskin' ? 'bg-amber-500/10' : 'bg-purple-500/10'} pointer-events-none`}></div>
                                </div>
                                <button 
                                  onClick={() => setSceneRefImages(prev => prev.filter((_, i) => i !== idx))} 
@@ -1830,7 +1982,7 @@ ${qualitySuffix}`;
                                >
                                   <X size={12} />
                                </button>
-                               <div className="absolute bottom-0 left-0 right-0 bg-purple-600/90 text-[10px] text-white text-center py-0.5 font-medium">场景{sceneRefImages.length > 1 ? ` ${idx + 1}` : '参考'}</div>
+                               <div className={`absolute bottom-0 left-0 right-0 ${mode === 'reskin' ? 'bg-amber-600/90' : 'bg-purple-600/90'} text-[10px] text-white text-center py-0.5 font-medium`}>{mode === 'reskin' ? (sceneRefImages.length > 1 ? `面料 ${idx + 1}` : '面料参考') : (sceneRefImages.length > 1 ? `场景 ${idx + 1}` : '场景参考')}</div>
                            </div>
                        ))}
 
@@ -1851,7 +2003,7 @@ ${qualitySuffix}`;
                                >
                                   <X size={12} />
                                </button>
-                               <div className="absolute bottom-0 left-0 right-0 bg-indigo-600/90 text-[10px] text-white text-center py-0.5 font-medium">产品 {idx + 1}</div>
+                               <div className="absolute bottom-0 left-0 right-0 bg-indigo-600/90 text-[10px] text-white text-center py-0.5 font-medium">{mode === 'reskin' ? '原图' : `产品 ${idx + 1}`}</div>
                            </div>
                        ))}
                        
@@ -1881,13 +2033,13 @@ ${qualitySuffix}`;
 
           <div className="max-w-5xl mx-auto p-4 md:p-6 md:pb-6">
             <div className="flex flex-col xl:flex-row gap-4 mb-4 items-start xl:items-center justify-between">
-              <div className={`text-xs font-medium px-4 py-2 rounded-xl border shadow-sm transition-colors flex items-center gap-2 ${mode === 'master' ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:border-purple-800 dark:text-purple-300' : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-800 dark:text-indigo-300'}`}>
-                <span className={`w-2 h-2 rounded-full ${mode === 'master' ? 'bg-purple-500' : 'bg-indigo-500'} animate-pulse`}></span>
-                {mode === 'master' ? '✨ 生图大师模式 (合成)' : '📐 提示词架构师 (解析)'}
+              <div className={`text-xs font-medium px-4 py-2 rounded-xl border shadow-sm transition-colors flex items-center gap-2 ${mode === 'master' ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:border-purple-800 dark:text-purple-300' : mode === 'reskin' ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300' : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-800 dark:text-indigo-300'}`}>
+                <span className={`w-2 h-2 rounded-full ${mode === 'master' ? 'bg-purple-500' : mode === 'reskin' ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`}></span>
+                {mode === 'master' ? '✨ 生图大师模式 (合成)' : mode === 'reskin' ? '🎨 换色换料模式 (替换面料/颜色)' : '📐 提示词架构师 (解析)'}
               </div>
 
-              {/* Toolbar: Only for Master Mode */}
-              {mode === 'master' && (
+              {/* Toolbar: For Master and Reskin Modes */}
+              {(mode === 'master' || mode === 'reskin') && (
                 <div className="flex flex-wrap gap-3 w-full xl:w-auto animate-in fade-in duration-300">
                   <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
                     <div className="px-2 text-slate-400 flex items-center gap-1"><Layout size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">Ratio</span></div>
@@ -1942,19 +2094,19 @@ ${qualitySuffix}`;
                     )}
                   </button>
 
-                  {/* Scene Reference Upload Button - Only in Master Mode */}
-                  {mode === 'master' && (
+                  {/* Scene/Material Reference Upload Button - Master and Reskin Modes */}
+                  {(mode === 'master' || mode === 'reskin') && (
                        <button 
                         onClick={() => sceneRefInputRef.current?.click()} 
                         onDrop={handleDropOnScene}
                         onDragOver={(e) => { preventDragDefault(e); e.currentTarget.classList.add('ring-2', 'ring-purple-400', 'bg-purple-50'); }}
                         onDragLeave={(e) => { e.currentTarget.classList.remove('ring-2', 'ring-purple-400', 'bg-purple-50'); }}
-                        className={`p-3 rounded-xl transition-all shadow-sm border border-transparent relative ${sceneRefImages.length > 0 ? 'bg-purple-50 text-purple-600 border-purple-200' : 'text-slate-500 hover:text-purple-600 hover:bg-white dark:hover:bg-slate-800 hover:border-slate-200'}`} 
-                        title="上传场景/风格参考图 (支持多张，可拖拽)"
+                        className={`p-3 rounded-xl transition-all shadow-sm border border-transparent relative ${sceneRefImages.length > 0 ? (mode === 'reskin' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-purple-50 text-purple-600 border-purple-200') : 'text-slate-500 hover:text-purple-600 hover:bg-white dark:hover:bg-slate-800 hover:border-slate-200'}`} 
+                        title={mode === 'reskin' ? "上传颜色/面料参考图 (要替换成的目标颜色/面料)" : "上传场景/风格参考图 (支持多张，可拖拽)"}
                        >
-                        <ImagePlus size={20} />
+                        {mode === 'reskin' ? <Pipette size={20} /> : <ImagePlus size={20} />}
                         {sceneRefImages.length > 0 && (
-                            <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-sm">{sceneRefImages.length}</span>
+                            <span className={`absolute -top-1 -right-1 ${mode === 'reskin' ? 'bg-amber-600' : 'bg-purple-600'} text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-sm`}>{sceneRefImages.length}</span>
                         )}
                       </button>
                   )}
@@ -1966,7 +2118,7 @@ ${qualitySuffix}`;
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
                 onPaste={handlePaste}
-                placeholder={mode === 'master' ? (pendingImages.length > 0 ? (sceneRefImages.length > 0 ? `已就绪：产品 + ${sceneRefImages.length}张场景参考。输入额外调整指令...` : `已就绪 ${pendingImages.length} 张产品图。输入场景描述...`) : "请先上传白底产品图，可选择上传场景参考图...") : "上传图片分析提示词..."}
+                placeholder={mode === 'reskin' ? (pendingImages.length > 0 ? (sceneRefImages.length > 0 ? `已就绪：原图 + 面料参考。可输入额外说明（如指定替换区域）...` : `已上传原图。请再上传目标颜色/面料参考图...`) : "请先上传要换色的产品原图...") : mode === 'master' ? (pendingImages.length > 0 ? (sceneRefImages.length > 0 ? `已就绪：产品 + ${sceneRefImages.length}张场景参考。输入额外调整指令...` : `已就绪 ${pendingImages.length} 张产品图。输入场景描述...`) : "请先上传白底产品图，可选择上传场景参考图...") : "上传图片分析提示词..."}
                 className="flex-1 max-h-[50vh] min-h-[160px] py-3 px-2 bg-transparent border-none focus:ring-0 resize-y text-slate-800 dark:text-slate-100 placeholder:text-slate-400 font-medium leading-relaxed custom-scrollbar"
                 rows={6}
               />

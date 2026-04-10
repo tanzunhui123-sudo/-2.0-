@@ -8,7 +8,7 @@ export interface Message {
   content: string;
 }
 
-export type Mode = 'architect' | 'master';
+export type Mode = 'architect' | 'master' | 'reskin';
 
 export interface ViewAngle {
   label: string;
