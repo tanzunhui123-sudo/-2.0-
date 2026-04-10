@@ -937,38 +937,64 @@ You MUST structure your response exactly as follows:
                 // 3. Construct Prompt based on inputs
                 const sceneRefCount = currentSceneRefs.length;
                 if (hasProduct && currentSceneRef) {
-                    // 场景参考 + 产品图：多张产品图作为参考，生成一张合成图
+                    // 场景参考 + 产品图：参考场景风格/环境/光照/装饰，生成新场景并放入产品
                     const productInputDesc = productCount > 1
                       ? `- Images 1-${productCount}: THE PRODUCT (${productCount} reference images showing different angles/views of the SAME product. Analyze ALL images together to understand the product's complete 3D form, texture, material, color, and branding. Preserve with 100% fidelity.)`
                       : `- Image 1: THE PRODUCT (absolute source of truth for product appearance — shape, texture, material, color, branding must be preserved with 100% fidelity).`;
                     const sceneStartIdx = productCount + 1;
                     const sceneInputDesc = sceneRefCount > 1
-                      ? `- Images ${sceneStartIdx}-${productCount + sceneRefCount}: SCENE REFERENCES (${sceneRefCount} reference images defining the target environment, lighting style, composition, and camera angle. Synthesize the best elements from all references.)`
-                      : `- Image ${sceneStartIdx}: THE SCENE REFERENCE (defines the target environment, lighting, composition, and camera angle).`;
+                      ? `- Images ${sceneStartIdx}-${productCount + sceneRefCount}: SCENE STYLE REFERENCES (${sceneRefCount} reference images — use them ONLY as style guides for environment aesthetics, decorative elements, color palette, lighting mood, and spatial composition. Do NOT copy the products/objects already present in these references.)`
+                      : `- Image ${sceneStartIdx}: SCENE STYLE REFERENCE (use ONLY as a style guide — extract its interior design style, decorative elements, color palette, lighting mood, material textures, and spatial composition. Do NOT copy the products/objects already in this reference image).`;
 
-                    prompt = `You are an elite commercial photographer and compositing specialist.
+                    prompt = `You are an elite commercial photographer and interior scene designer.
 
 INPUTS:
 ${productInputDesc}
 ${sceneInputDesc}
+${userInput ? `\n- USER INSTRUCTIONS: "${userInput}" (READ CAREFULLY — this is the user's specific request. Understand exactly what they are asking for before generating. Follow their instructions precisely.)` : ''}
 
-PRIMARY TASK — PRODUCT REPLACEMENT:
-${productCount > 1 ? `Analyze ALL ${productCount} product reference images together to build a complete understanding of the product's form and details. ` : ''}${sceneRefCount > 1 
-  ? `Analyze all ${sceneRefCount} scene references to understand the desired environment style, lighting, and composition. Create a unified scene that combines the best elements from all references, then seamlessly composite the Product into this scene.`
-  : `Replace any existing product/object in the Scene Reference with the Product. 
-The Product must be seamlessly composited into the exact position and scale where the original product was in the scene.`}
+PRIMARY TASK — SCENE-INSPIRED PRODUCT PLACEMENT (NOT product replacement):
+${userInput ? `IMPORTANT: The user has provided specific instructions: "${userInput}". Read and understand these instructions FIRST. Your output must satisfy the user's request above all else, while following the guidelines below.` : `You must CREATE A NEW SCENE inspired by the style of the reference image(s), then place the Product into it as the hero subject.`}
+
+Step 1: ANALYZE THE PRODUCT (PRIMARY PRIORITY)
+${productCount > 1 ? `Study ALL ${productCount} product reference images together to build a complete understanding of the product's 3D form, materials, colors, textures, and branding details. ` : `Study the product image carefully to fully understand its shape, materials, colors, textures, and branding details. `}The product must be rendered with 100% visual fidelity — do NOT alter its color, shape, material, or any design detail.
+Also analyze the product image's camera angle, perspective, and viewing direction — this will be the basis for the final output's perspective.
+
+Step 2: EXTRACT SCENE STYLE (from reference${sceneRefCount > 1 ? 's' : ''} — SECONDARY REFERENCE ONLY)
+${sceneRefCount > 1 
+  ? `Analyze all ${sceneRefCount} scene style references and synthesize their best elements to understand:`
+  : `Analyze the scene style reference to understand:`}
+- Interior design style (e.g., modern minimalist, Japandi, Scandinavian, mid-century modern)
+- Color palette and material palette (wall colors, floor materials, fabric textures)
+- Decorative elements and accessories (plants, vases, art, rugs, cushions, etc.)
+- Lighting mood and direction (warm natural light, studio lighting, golden hour, etc.)
+- Spatial composition style (NOT to override the product's perspective)
+
+Step 3: GENERATE NEW SCENE WITH PRODUCT
+Create a brand-new photorealistic scene that:
+- Features the Product as the HERO/MAIN SUBJECT — the product is the absolute center of the composition
+- Embodies the design style, color palette, and decorative atmosphere extracted from the reference${sceneRefCount > 1 ? 's' : ''}
+- Builds the entire scene AROUND the product, complementing it rather than competing with it
+- Includes complementary furniture, decorations, and accessories that match the reference style
+- Has lighting that matches the mood of the reference but is physically consistent with the new scene layout
+
+CRITICAL RULES:
+- The Product's appearance (color, shape, material, texture, branding) must be IDENTICAL to the input product image(s). Do NOT recolor, reshape, or alter the product in any way.
+- The product image is the PRIMARY input. The scene reference is SECONDARY — only used for style/mood inspiration.
+- The scene should be INSPIRED BY the reference style, not a pixel-for-pixel copy.
+- Do NOT place the scene reference's existing products/objects into the output — only the user's Product.
 
 PERSPECTIVE RULES:
 ${hasPerspectiveHint 
-  ? `- The user has specified a camera angle: "${userInput}". Follow this angle PRECISELY for the final composite.` 
-  : `- Match the EXACT camera angle and perspective of the Scene Reference${sceneRefCount > 1 ? 's' : ''}. The Product must be re-rendered from the same viewing angle as the scene.`}
+  ? `- The user has specified a camera angle: "${userInput}". Follow this angle PRECISELY.` 
+  : `- STRICTLY maintain the same camera angle and perspective as seen in the PRODUCT image(s). The product was photographed from a specific viewpoint — the final scene must use that same viewpoint so the product looks natural and undistorted.
+- Do NOT use the scene reference's camera angle. The scene reference is only for style — the perspective comes from the product image.`}
 
-COMPOSITING REQUIREMENTS:
-- Lighting direction, intensity, color temperature must match the scene reference${sceneRefCount > 1 ? 's' : ''} exactly.
+COMPOSITING & QUALITY:
+- Lighting direction, intensity, and color temperature must be internally consistent within the new scene.
 - Cast shadows and reflections must be physically accurate for the scene's light sources.
-- Depth of field and focus plane must match the scene reference.
 - Surface interactions (reflections on tables, soft shadows on fabric, etc.) must be realistic.
-- ${userInput || "Ensure a seamless, photorealistic integration where the product looks native to the scene."}
+${userInput ? `- Follow all user instructions precisely: "${userInput}"` : `- Ensure the product looks naturally placed in the scene, as if photographed on location by a professional photographer.`}
 ${colorContext}${qualitySuffix}`;
 
                 } else if (currentSceneRef && !hasProduct) {
@@ -1037,7 +1063,7 @@ ${qualitySuffix}`;
                 // Add "Thinking" message
                 let thinkingMsg = "🎨 正在生成...";
                 if (hasProduct && currentSceneRef) {
-                    thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在参考${productCount}张产品图和场景风格复刻并植入产品...`;
+                    thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在参考场景风格，为${productCount}张产品图构建新场景...`;
                 } else if (hasProduct) {
                     thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在解析${productCount}张产品图透视并构建场景...`;
                 } else {
