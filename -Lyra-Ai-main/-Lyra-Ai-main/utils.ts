@@ -107,6 +107,7 @@ import { Message } from './types';
 const DB_NAME = 'LyraStudioDB';
 const STORE_NAME = 'messages';
 const DB_VERSION = 2; // Bump version to ensure store creation logic runs if needed
+const MAX_HISTORY_MESSAGES = 80; // Limit to prevent Out of Memory crashes
 
 export const initDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
@@ -151,10 +152,18 @@ export const getHistoryFromDB = async (): Promise<Message[]> => {
       
       request.onsuccess = () => {
         const results = request.result as Message[];
-        // Sort by ID to ensure chronological order
-        if (results) {
+        if (results && results.length > 0) {
+            // Sort by ID to ensure chronological order
             results.sort((a, b) => a.id - b.id);
-            resolve(results);
+            // Only return the most recent messages to prevent Out of Memory
+            if (results.length > MAX_HISTORY_MESSAGES) {
+                const trimmed = results.slice(-MAX_HISTORY_MESSAGES);
+                // Clean up old entries from DB asynchronously
+                pruneOldMessages(results.slice(0, results.length - MAX_HISTORY_MESSAGES).map(m => m.id));
+                resolve(trimmed);
+            } else {
+                resolve(results);
+            }
         } else {
             resolve([]);
         }
@@ -162,8 +171,24 @@ export const getHistoryFromDB = async (): Promise<Message[]> => {
       request.onerror = () => reject(request.error);
     });
   } catch (err) {
-    console.error('Failed to load history', err);
+    console.error('Failed to load history, clearing corrupted DB', err);
+    // If loading fails (e.g., corrupted data), clear DB to recover
+    try { await clearHistoryDB(); } catch (_) {}
     return [];
+  }
+};
+
+// Remove old messages from DB to free storage
+const pruneOldMessages = async (idsToRemove: number[]) => {
+  try {
+    const db = await initDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    for (const id of idsToRemove) {
+      store.delete(id);
+    }
+  } catch (err) {
+    console.error('Failed to prune old messages', err);
   }
 };
 

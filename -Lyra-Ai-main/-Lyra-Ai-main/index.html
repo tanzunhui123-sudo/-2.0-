@@ -26,6 +26,35 @@
 </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Emergency cleanup: clear oversized IndexedDB BEFORE React loads to prevent Out of Memory
+      (function() {
+        try {
+          var req = indexedDB.open('LyraStudioDB', 2);
+          req.onsuccess = function(e) {
+            var db = e.target.result;
+            if (!db.objectStoreNames.contains('messages')) { db.close(); return; }
+            var tx = db.transaction('messages', 'readonly');
+            var store = tx.objectStore('messages');
+            var countReq = store.count();
+            countReq.onsuccess = function() {
+              db.close();
+              // If more than 50 messages, nuke the whole DB to prevent OOM
+              if (countReq.result > 50) {
+                var delReq = indexedDB.deleteDatabase('LyraStudioDB');
+                delReq.onsuccess = function() { console.log('LyraStudioDB cleared (too large)'); };
+              }
+            };
+            countReq.onerror = function() { db.close(); };
+          };
+          req.onerror = function() {
+            indexedDB.deleteDatabase('LyraStudioDB');
+          };
+        } catch(e) {
+          try { indexedDB.deleteDatabase('LyraStudioDB'); } catch(_) {}
+        }
+      })();
+    </script>
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>

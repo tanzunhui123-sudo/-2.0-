@@ -263,13 +263,18 @@ export default function App() {
     };
     checkApiKey();
 
-    // 2. Load History from DB
+    // 2. Load History from DB (with error recovery for Out of Memory)
     const loadHistory = async () => {
-      const history = await getHistoryFromDB();
-      if (history.length > 0) {
-        setMessages(history);
-      } else {
-        // Save initial message if DB is empty
+      try {
+        const history = await getHistoryFromDB();
+        if (history.length > 0) {
+          setMessages(history);
+        } else {
+          saveMessageToDB(INITIAL_MESSAGE);
+        }
+      } catch (err) {
+        console.error('History load failed, resetting:', err);
+        try { await clearHistoryDB(); } catch (_) {}
         saveMessageToDB(INITIAL_MESSAGE);
       }
     };
