@@ -4,10 +4,10 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # 复制依赖文件
-COPY -Lyra-Ai-main/-Lyra-Ai-main/package*.json ./
+COPY -Lyra-Ai-main/-Lyra-Ai-main/package.json ./
 
 # 安装依赖
-RUN npm ci
+RUN npm install
 
 # 复制源代码
 COPY -Lyra-Ai-main/-Lyra-Ai-main/ ./
