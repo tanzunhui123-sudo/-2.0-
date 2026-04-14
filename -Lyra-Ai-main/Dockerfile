@@ -24,11 +24,27 @@ FROM nginx:alpine
 # 复制构建产物
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# 复制 nginx 配置（可选）
+# 复制 nginx 配置（含 KIE.AI 反向代理）
 RUN echo 'server { \
     listen 80; \
     root /usr/share/nginx/html; \
     index index.html; \
+    client_max_body_size 50M; \
+    \
+    location /kie-upload/ { \
+        proxy_pass https://kieai.redpandaai.co/; \
+        proxy_set_header Host kieai.redpandaai.co; \
+        proxy_set_header X-Real-IP $remote_addr; \
+        proxy_ssl_server_name on; \
+    } \
+    \
+    location /kie-api/ { \
+        proxy_pass https://api.kie.ai/; \
+        proxy_set_header Host api.kie.ai; \
+        proxy_set_header X-Real-IP $remote_addr; \
+        proxy_ssl_server_name on; \
+    } \
+    \
     location / { \
         try_files $uri $uri/ /index.html; \
     } \

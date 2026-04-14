@@ -15,8 +15,9 @@ export const MOCK_BACKGROUNDS = [
   "https://images.unsplash.com/photo-1595515106968-b43729abb1a6?q=80&w=1000&auto=format&fit=crop"  // Greenery
 ];
 
-export const ASPECT_RATIOS = ['1:1', '4:3', '3:4', '9:16', '16:9'];
+export const ASPECT_RATIOS = ['1:1', '4:3', '3:4', '9:16', '16:9', '2:3', '3:2', '4:5', '5:4', '21:9', '1:4', '4:1'];
 export const RESOLUTIONS = ['1K', '2K', '4K'];
+export const OUTPUT_FORMATS = ['jpg', 'png'];
 export const VIEW_ANGLES: ViewAngle[] = [
   { label: '正面', value: '正面视图' },
   { label: '侧面', value: '侧面视图' },

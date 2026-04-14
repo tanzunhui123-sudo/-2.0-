@@ -11,7 +11,7 @@ import MessageBubble from './components/MessageBubble';
 import InpaintingModal from './components/InpaintingModal';
 import { 
   INITIAL_MESSAGE, ASPECT_RATIOS, 
-  RESOLUTIONS, DESIGN_COLORS 
+  RESOLUTIONS, OUTPUT_FORMATS, DESIGN_COLORS 
 } from './constants';
 import { Message, Mode } from './types';
 import { 
@@ -28,6 +28,7 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('architect');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [resolution, setResolution] = useState('2K');
+  const [outputFormat, setOutputFormat] = useState<'jpg' | 'png'>('jpg');
   
   // Changed from single string to array of strings for multi-upload support
   const [pendingImages, setPendingImages] = useState<string[]>([]);
@@ -119,48 +120,98 @@ export default function App() {
   // ===== Kie.ai Helper Functions =====
   const getKieApiKey = () => userApiKey || '';
 
+  // Compress base64 image only if over 30MB (KIE.AI limit)
+  const compressImageForUpload = (base64DataUri: string): Promise<string> => {
+    const sizeInMB = base64DataUri.length * 0.75 / (1024 * 1024); // base64 → actual bytes
+    if (sizeInMB <= 28) return Promise.resolve(base64DataUri); // under 30MB, no compression needed
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.sqrt(28 / sizeInMB);
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(base64DataUri); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        const compressed = canvas.toDataURL('image/jpeg', 0.9);
+        console.log(`Image compressed: ${sizeInMB.toFixed(1)}MB → ${(compressed.length * 0.75 / (1024*1024)).toFixed(1)}MB`);
+        resolve(compressed);
+      };
+      img.onerror = () => resolve(base64DataUri);
+      img.src = base64DataUri;
+    });
+  };
+
   // Upload base64 image to kie.ai and get URL
   const kieUploadImage = async (base64DataUri: string): Promise<string> => {
-    const resp = await fetch('https://kieai.redpandaai.co/api/file-base64-upload', {
+    const compressed = await compressImageForUpload(base64DataUri);
+    const resp = await fetch('/kie-upload/api/file-base64-upload', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${getKieApiKey()}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64Data: base64DataUri, uploadPath: 'lyra/uploads' })
+      body: JSON.stringify({ base64Data: compressed, uploadPath: 'lyra/uploads' })
     });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      throw new Error(`图片上传失败 (HTTP ${resp.status}): ${errText.slice(0, 200)}`);
+    }
     const data = await resp.json();
     if (!data.success) throw new Error(data.msg || 'Image upload failed');
     return data.data.downloadUrl;
   };
 
-  // Create async image task on kie.ai
-  const kieCreateTask = async (model: string, input: any): Promise<string> => {
-    const resp = await fetch('https://api.kie.ai/api/v1/jobs/createTask', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${getKieApiKey()}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, input })
-    });
-    const data = await resp.json();
-    if (data.code !== 200) throw new Error(data.msg || 'Task creation failed');
-    return data.data.taskId;
+  // Create async image task on kie.ai (with retry)
+  const kieCreateTask = async (model: string, input: any, retries = 2): Promise<string> => {
+    for (let i = 0; i <= retries; i++) {
+      try {
+        const resp = await fetch('/kie-api/api/v1/jobs/createTask', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${getKieApiKey()}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, input })
+        });
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => '');
+          throw new Error(`KIE 任务创建失败 (HTTP ${resp.status}): ${errText.slice(0, 200)}`);
+        }
+        const data = await resp.json();
+        if (data.code !== 200) throw new Error(data.msg || 'Task creation failed');
+        return data.data.taskId;
+      } catch (error: any) {
+        if (i < retries && (error.message?.includes('503') || error.message?.includes('fetch'))) {
+          console.warn(`kieCreateTask retry ${i + 1}/${retries}...`);
+          await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error('KIE 任务创建失败');
   };
 
   // Poll kie.ai task until completion
-  const kiePollTask = async (taskId: string, maxWait = 120000): Promise<string[]> => {
+  const kiePollTask = async (taskId: string, maxWait = 300000): Promise<string[]> => {
     const start = Date.now();
     while (Date.now() - start < maxWait) {
-      await new Promise(r => setTimeout(r, 3000));
-      const resp = await fetch(`https://api.kie.ai/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`, {
+      await new Promise(r => setTimeout(r, 4000));
+      const resp = await fetch(`/kie-api/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`, {
         headers: { 'Authorization': `Bearer ${getKieApiKey()}` }
       });
+      if (!resp.ok) {
+        console.warn(`Poll HTTP error: ${resp.status}`);
+        continue;
+      }
       const data = await resp.json();
       if (data.code !== 200) throw new Error(data.msg || 'Task query failed');
       const state = data.data?.state;
+      console.log(`Task ${taskId.slice(0,8)}... state: ${state}, elapsed: ${((Date.now()-start)/1000).toFixed(0)}s`);
       if (state === 'success') {
         const resultJson = JSON.parse(data.data.resultJson || '{}');
         return resultJson.resultUrls || [];
       }
       if (state === 'fail') throw new Error(data.data?.failMsg || 'Image generation failed');
     }
-    throw new Error('Task timed out');
+    throw new Error('任务超时（已等待5分钟）');
   };
 
   // Kie.ai text generation (chat completions)
@@ -168,7 +219,7 @@ export default function App() {
     const messages: any[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: userContent });
-    const resp = await fetch(`https://api.kie.ai/${model}/v1/chat/completions`, {
+    const resp = await fetch(`/kie-api/${model}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${getKieApiKey()}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages, stream: false, include_thoughts: false })
@@ -184,8 +235,85 @@ export default function App() {
 
   // Kie.ai full image generation flow: upload images → create task → poll → get URLs
   const kieGenerateImage = async (prompt: string, imageBase64s: string[], opts: {
-    aspectRatio?: string; resolution?: string; isMask?: boolean;
+    aspectRatio?: string; resolution?: string; isMask?: boolean; outputFormat?: string;
   } = {}): Promise<string | null> => {
+    // KIE image models need short, descriptive prompts (max ~2000 chars recommended)
+    // Strip long system instructions designed for LLMs like Gemini
+    let kiePrompt = prompt;
+    if (kiePrompt.length > 2000) {
+      // Try to extract user's actual instruction from the long system prompt
+      const userInstrMatch = kiePrompt.match(/USER INSTRUCTIONS:\s*"([^"]+)"/i) 
+        || kiePrompt.match(/ADDITIONAL USER REQUIREMENTS:\s*(.+?)(?:\n|$)/i)
+        || kiePrompt.match(/user requests:\s*"([^"]+)"/i);
+      const userInstr = userInstrMatch?.[1]?.trim() || '';
+      
+      // Detect mode from prompt content and build a concise prompt
+      if (kiePrompt.includes('MATERIAL') && kiePrompt.includes('REPLACEMENT')) {
+        // Reskin mode — detailed prompt to preserve texture realism
+        kiePrompt = `Material and color replacement task.
+
+Image 1 is the ORIGINAL product photo. Image 2 is the TARGET material/texture reference.
+
+TASK: Replace ONLY the fabric/material surface of the product in Image 1 with the material shown in Image 2.
+
+CRITICAL TEXTURE REQUIREMENTS:
+- Reproduce the EXACT weave pattern, thread density, and surface grain from Image 2
+- The new material must show realistic micro-texture details: individual fibers, weave crossings, fabric pilling, or leather grain pores
+- Fabric wrinkles, creases, and folds must deform the texture pattern naturally — stretched on convex surfaces, compressed in folds
+- Maintain correct texture scale — the pattern size must be proportional to the real product dimensions
+- Light interaction must match material physics: matte fabrics absorb light with soft gradients, velvet has directional sheen, leather shows specular highlights
+- Seam lines, stitching, and piping must remain visible with the new material draping over them
+
+STRICT PRESERVATION RULES:
+- Keep the EXACT same product shape, silhouette, proportions, camera angle, and perspective as Image 1
+- Keep the IDENTICAL background, floor, surrounding objects, and all non-product elements
+- Keep all structural elements: legs, frames, armrests shape, cushion form
+- Preserve the original photo's lighting direction, shadow positions, and ambient occlusion
+- The result must look like an actual photograph, not a 3D render or digital painting
+
+OUTPUT: A photorealistic product photo indistinguishable from a real camera shot. The texture must have the same tangible, tactile quality as a close-up fabric swatch.${userInstr ? `\n\nUser instruction: ${userInstr}` : ''}`;
+      } else if (kiePrompt.includes('SCENE') && kiePrompt.includes('PRODUCT')) {
+        // Master mode with scene reference — enhanced for material fidelity
+        kiePrompt = `Product scene placement task.
+
+Place the product from the input image(s) into a new photorealistic scene inspired by the style reference.
+
+PRODUCT FIDELITY:
+- The product must be pixel-perfect identical to the original: same shape, color, material, branding, and every surface detail
+- Preserve the product's material textures exactly: fabric weave, leather grain, wood grain, metal finish, stitching, and seam lines
+- Surface micro-details (thread patterns, material pores, surface roughness) must remain sharp and visible
+- Do NOT smooth, blur, or simplify any product surface
+
+SCENE INTEGRATION:
+- Build a new scene AROUND the product inspired by the style reference's design aesthetic
+- Lighting must be physically consistent: correct shadow direction, ambient occlusion under the product, realistic light falloff
+- Material interactions: reflections on glossy floors, soft shadow on fabric surfaces, specular highlights on metal parts
+- All scene materials (floor, walls, props) must also show realistic texture: wood grain, marble veining, carpet pile, concrete pores
+
+OUTPUT: Professional commercial photograph. Shot on medium-format digital camera, natural lighting, RAW-quality detail.${userInstr ? `\n\nUser instruction: ${userInstr}` : ''}`;
+      } else if (kiePrompt.includes('PERSPECTIVE') || kiePrompt.includes('SCENE SYNTHESIS')) {
+        kiePrompt = `Scene perspective transformation task.
+
+${userInstr ? `User request: ${userInstr}` : 'Re-render with enhanced composition and lighting.'}
+
+REQUIREMENTS:
+- Reconstruct the 3D space and re-project from the requested viewpoint with accurate parallax and occlusion
+- All material textures must remain crisp and realistic: fabric weave, wood grain, stone texture, metal finish, carpet pile
+- Surface micro-details must be preserved — do NOT smooth or simplify any texture
+- Recalculate lighting for the new viewpoint: shadows, reflections, specular highlights, ambient occlusion
+- Hidden areas revealed by the new angle must be filled with contextually accurate materials matching existing surfaces
+- Architectural lines and vanishing points must be geometrically correct
+
+OUTPUT: Photorealistic photograph with tangible material quality. Every surface must look real enough to touch.`;
+      } else {
+        // Generic: truncate at last complete sentence within 2000 chars
+        const truncated = kiePrompt.slice(0, 2000);
+        const lastPeriod = truncated.lastIndexOf('.');
+        kiePrompt = lastPeriod > 500 ? truncated.slice(0, lastPeriod + 1) : truncated;
+      }
+      console.log(`KIE prompt shortened: ${prompt.length} → ${kiePrompt.length} chars`);
+    }
+
     // Upload images if provided
     const imageUrls: string[] = [];
     for (const img of imageBase64s) {
@@ -201,9 +329,9 @@ export default function App() {
       // Inpainting/Edit mode
       model = userModel;
       input = {
-        prompt,
+        prompt: kiePrompt,
         image_urls: imageUrls,
-        output_format: 'png',
+        output_format: opts.outputFormat || 'jpg',
         aspect_ratio: opts.aspectRatio || '1:1',
         resolution: opts.resolution || '2K'
       };
@@ -211,9 +339,9 @@ export default function App() {
       // Image-to-image
       model = userModel;
       input = {
-        prompt,
+        prompt: kiePrompt,
         image_input: imageUrls,
-        output_format: 'png',
+        output_format: opts.outputFormat || 'jpg',
         aspect_ratio: opts.aspectRatio || '1:1',
         resolution: opts.resolution || '2K'
       };
@@ -221,8 +349,8 @@ export default function App() {
       // Text-to-image
       model = userModel;
       input = {
-        prompt,
-        output_format: 'png',
+        prompt: kiePrompt,
+        output_format: opts.outputFormat || 'jpg',
         aspect_ratio: opts.aspectRatio || '1:1',
         resolution: opts.resolution || '2K'
       };
@@ -513,6 +641,13 @@ export default function App() {
                   { str: '3:4', val: 3/4 },
                   { str: '16:9', val: 16/9 },
                   { str: '9:16', val: 9/16 },
+                  { str: '2:3', val: 2/3 },
+                  { str: '3:2', val: 3/2 },
+                  { str: '4:5', val: 4/5 },
+                  { str: '5:4', val: 5/4 },
+                  { str: '21:9', val: 21/9 },
+                  { str: '1:4', val: 1/4 },
+                  { str: '4:1', val: 4 },
               ];
               const closest = supportedRatios.reduce((prev, curr) => 
                   Math.abs(curr.val - ratio) < Math.abs(prev.val - ratio) ? curr : prev
@@ -562,11 +697,11 @@ export default function App() {
         if (apiProvider === 'kie') {
             // === Kie.ai path ===
             const prompt = type === 'upscale'
-                ? "Upscale this image to 4K resolution. Improve sharpness, texture details, and clarity while preserving the original subject, composition, and colors. High Fidelity."
-                : `Outpaint and expand this image to fit the ${targetRatio} aspect ratio. Generate coherent and realistic background content for the empty space that seamlessly matches the original lighting, style, and perspective.`;
+                ? "Upscale this image to 4K resolution. Significantly enhance sharpness, texture micro-details, and clarity. Preserve the original subject, composition, and colors. Material surfaces must gain visible texture detail: fabric thread patterns, leather grain pores, wood grain lines, metal finish quality. Do NOT over-smooth — add natural surface detail and micro-texture. High Fidelity, photorealistic."
+                : `Outpaint and expand this image to fit the ${targetRatio} aspect ratio. Generate coherent and realistic background content for the empty space. New content must have matching material textures with full micro-detail (fabric weave, floor grain, wall texture). Seamlessly match the original lighting, style, perspective, and material quality.`;
             const ratio = type === 'upscale' ? await getClosestAspectRatio(sourceImageUrl) : (targetRatio || '16:9');
             const res = type === 'upscale' ? '4K' : '2K';
-            generatedImageUrl = await kieGenerateImage(prompt, [sourceImageUrl], { aspectRatio: ratio, resolution: res });
+            generatedImageUrl = await kieGenerateImage(prompt, [sourceImageUrl], { aspectRatio: ratio, resolution: res, outputFormat: outputFormat });
         } else {
             // === Google SDK path ===
             const ai = getAiClient();
@@ -580,7 +715,7 @@ export default function App() {
             let config = {};
 
             if (type === 'upscale') {
-                parts.push({ text: "Upscale this image to 4K resolution. Significantly improve sharpness, texture details, and clarity while strictly preserving the original subject, composition, and colors. High Fidelity." });
+                parts.push({ text: "Upscale this image to 4K resolution. Significantly enhance sharpness, material texture micro-details, and clarity. Preserve the original subject, composition, and colors. Every material surface must gain visible texture detail: fabric must show thread weave patterns, leather must show grain pores, wood must show grain lines, metal must show finish quality. Do NOT over-smooth any surface — enhance natural micro-texture and surface variation. High Fidelity, photorealistic." });
                 const ratio = await getClosestAspectRatio(sourceImageUrl);
                 config = {
                     imageConfig: { imageSize: '4K', aspectRatio: ratio }
@@ -622,8 +757,9 @@ export default function App() {
   };
 
 
-  const openInpainting = (imageUrl: string) => {
-    setInpaintTargetImage(imageUrl);
+  const openInpainting = async (imageUrl: string) => {
+    const dataUri = await fetchImageAsDataUri(imageUrl);
+    setInpaintTargetImage(dataUri);
     setIsInpainting(true);
   };
 
@@ -655,14 +791,14 @@ export default function App() {
             const allImages = [inpaintTargetImage, maskBase64];
             if (materialImage) {
                 allImages.push(materialImage);
-                finalPrompt = `MATERIAL REPLACEMENT: ${prompt}. Replace the masked area material with the texture from the reference image. Photorealistic.`;
+                finalPrompt = `MATERIAL REPLACEMENT: ${prompt}. Replace the masked area material with the EXACT texture from the reference image. Reproduce the reference material's weave pattern, grain, surface roughness, and micro-texture detail. The new material must interact realistically with existing lighting (shadows, highlights, ambient occlusion). Do NOT smooth or flatten the surface — maintain tangible tactile quality. Photorealistic.`;
             } else if (referenceImage) {
                 allImages.push(referenceImage);
                 finalPrompt = `INPAINT with reference: ${prompt}. Place the person/character from the reference into the masked area. Match lighting and perspective.`;
             } else {
                 finalPrompt = `EDIT: ${prompt}. The second image is a MASK where white pixels indicate the area to modify.`;
             }
-            generatedImageUrl = await kieGenerateImage(finalPrompt, allImages, { aspectRatio: targetAspectRatio, resolution: resolution, isMask: true });
+            generatedImageUrl = await kieGenerateImage(finalPrompt, allImages, { aspectRatio: targetAspectRatio, resolution: resolution, isMask: true, outputFormat: outputFormat });
         } else {
             // === Google SDK path ===
             const ai = getAiClient();
@@ -691,10 +827,13 @@ export default function App() {
                  
                  CRITICAL PHYSICS SIMULATION:
                  - Replace the material in the masked area with the EXACT material from Image 3.
-                 - Synthesize the new material's physical properties: Diffuse reflection, Specularity, Roughness, and Micro-texture (e.g. fabric weave, wood grain).
-                 - The new material must interact realistically with the existing lighting environment of Image 1 (Shadows, Highlights, AO).
+                 - Reproduce the reference material's EXACT weave pattern, thread density, surface grain, and micro-texture at correct scale.
+                 - Synthesize the new material's physical properties: Diffuse reflection, Specularity, Roughness, and Micro-texture (e.g. fabric weave crossings, individual fibers, leather grain pores, wood grain lines).
+                 - The new material must interact realistically with the existing lighting environment of Image 1 (Shadows, Highlights, AO, specular response).
+                 - Fabric must deform naturally over underlying geometry: stretched on convex surfaces, compressed in folds/creases.
                  - Preserve the underlying geometry and folds if applicable, but fully replace the surface shader.
-                 - High Fidelity, 8k Resolution, Photorealistic.`;
+                 - Do NOT over-smooth or flatten the material surface — natural surface variation and micro-imperfections add realism.
+                 - High Fidelity, 8k Resolution, Photorealistic. Every texture must look tangible enough to touch.`;
             } else if (referenceImage) {
                  const refBase64 = referenceImage.split(',')[1];
                  const refMime = referenceImage.split(';')[0].split(':')[1];
@@ -931,7 +1070,7 @@ You MUST structure your response exactly as follows:
                 const hasMaterialRef = currentSceneRefs.length > 0;
                 const userInput = currentInput || "";
 
-                const qualitySuffix = "\n\nPHOTO QUALITY: Shot on Sony A7R V with 85mm f/1.4 GM lens. Natural ambient lighting with soft fill. RAW-quality color depth, fine grain texture, true-to-life material rendering. 8K resolution, professional color grading. The final image must be indistinguishable from a real professional photograph.";
+                const qualitySuffix = "\n\nPHOTO QUALITY: Shot on Sony A7R V with 85mm f/1.4 GM lens. Natural ambient lighting with soft fill. RAW-quality color depth, fine grain texture, true-to-life material rendering. 8K resolution, professional color grading. The final image must be indistinguishable from a real professional photograph.\n\nMATERIAL REALISM MANDATE: Every visible surface must show its real-world micro-texture at full resolution. Fabric must show individual thread weave patterns and fiber detail. Leather must show grain pores and natural surface variation. Wood must show grain lines and annual ring patterns. Metal must show brushed finish or reflection quality appropriate to its type. Do NOT over-smooth, blur, or digitally flatten ANY surface. Surface imperfections (slight fabric pilling, minor grain variation, natural material inconsistency) add realism and MUST be present.";
 
                 let prompt = "";
 
@@ -962,8 +1101,12 @@ Step 3: APPLY THE REPLACEMENT
 - Replace the product's surface material/color/texture with the reference material
 - The material must wrap naturally around the product's 3D form, following its contours and seams
 - Texture scale must be realistic relative to the product's size
-- Lighting interactions must be recalculated: different materials reflect light differently (matte fabric vs glossy leather vs textured linen)
+- Reproduce the EXACT weave pattern, thread density, fiber detail, and surface grain from the reference material
+- Fabric wrinkles, creases, and folds must deform the texture pattern naturally — stretched on convex surfaces, compressed in folds
+- Lighting interactions must be recalculated: matte fabrics absorb light with soft gradients, velvet has directional sheen, leather shows specular highlights, linen has subtle translucency at edges
 - Shadows, creases, and folds in the fabric must look natural for the new material type
+- The replaced material must show micro-texture details: individual fibers, weave crossings, grain pores, or surface roughness variation
+- Do NOT over-smooth or flatten any surface — natural material inconsistencies add realism
 
 CRITICAL RULES:
 - DO NOT change the product's shape, size, silhouette, or proportions
@@ -986,9 +1129,12 @@ ${userInput ? `The user requests: "${userInput}". Apply this color/material chan
 
 RULES:
 - Replace ONLY the product's surface color/material/texture as described
+- Reproduce realistic micro-texture for the target material: fabric weave/thread patterns, leather grain, wood grain, metal finish
+- Material must wrap naturally around the product's 3D form with correct texture deformation in folds and creases
 - DO NOT change shape, size, composition, background, camera angle, or non-product elements
 - Preserve structural elements (legs, frames, hardware) — only change surface covering
-- Lighting and shadow response must be recalculated for the new material
+- Lighting and shadow response must be recalculated: different materials interact with light differently
+- Do NOT over-smooth or flatten surfaces — maintain tangible, tactile material quality
 ${qualitySuffix}`;
                 } else {
                     prompt = `请上传要换色的产品原图，以及目标颜色/面料的参考图。`;
@@ -1020,7 +1166,8 @@ ${qualitySuffix}`;
                     currentSceneRefs.forEach(ref => inputImages.push(ref));
                     generatedImageUrl = await kieGenerateImage(prompt, inputImages, {
                         aspectRatio: aspectRatio,
-                        resolution: resolution
+                        resolution: resolution,
+                        outputFormat: outputFormat
                     });
                 } else {
                     const parts: any[] = [];
@@ -1086,7 +1233,7 @@ ${qualitySuffix}`;
                 // Default photorealistic quality suffix (only if user didn't specify quality style)
                 const qualitySuffix = hasQualityHint 
                   ? "" 
-                  : "\n\nPHOTO QUALITY: Shot on Sony A7R V with 85mm f/1.4 GM lens. Natural ambient lighting with soft fill. RAW-quality color depth, fine grain texture, true-to-life skin tones and material rendering. 8K resolution, professional color grading. The final image must be indistinguishable from a real professional photograph.";
+                  : "\n\nPHOTO QUALITY: Shot on Sony A7R V with 85mm f/1.4 GM lens. Natural ambient lighting with soft fill. RAW-quality color depth, fine grain texture, true-to-life skin tones and material rendering. 8K resolution, professional color grading. The final image must be indistinguishable from a real professional photograph.\n\nMATERIAL REALISM MANDATE: Every surface must show its real-world micro-texture at full resolution. Fabric must display individual thread weave patterns and fiber detail. Leather must show grain pores and natural surface variation. Wood must show grain lines. Metal must show finish quality (brushed, polished, matte). Carpet/rug must show pile direction and fiber density. Do NOT over-smooth, blur, or digitally flatten ANY material surface. Subtle surface imperfections (fabric pilling, grain variation, natural inconsistency) add realism and must be present.";
 
                 // 3. Construct Prompt based on inputs
                 const sceneRefCount = currentSceneRefs.length;
@@ -1148,6 +1295,9 @@ COMPOSITING & QUALITY:
 - Lighting direction, intensity, and color temperature must be internally consistent within the new scene.
 - Cast shadows and reflections must be physically accurate for the scene's light sources.
 - Surface interactions (reflections on tables, soft shadows on fabric, etc.) must be realistic.
+- ALL material textures must be rendered at maximum fidelity: product fabric weave, floor material grain, wall texture, prop surface details.
+- Do NOT smooth, blur, or simplify any surface texture — every material must look tangible and tactile.
+- Scene props and furniture must also show realistic material detail (wood grain, metal finish, glass clarity, textile patterns).
 ${userInput ? `- Follow all user instructions precisely: "${userInput}"` : `- Ensure the product looks naturally placed in the scene, as if photographed on location by a professional photographer.`}
 ${colorContext}${qualitySuffix}`;
 
@@ -1170,9 +1320,12 @@ Reconstruct the 3D space of the scene and re-project it from the requested viewp
 
 REQUIREMENTS:
 - Maintain all scene elements (furniture, objects, materials, textures, colors) with full fidelity.
-- Lighting must be physically re-calculated for the new viewpoint.
-- Hidden areas revealed by the new angle should be filled with contextually appropriate content.
+- ALL material textures must remain crisp and detailed: fabric weave patterns, wood grain, stone pores, metal finish, carpet pile, glass clarity.
+- Do NOT smooth, blur, or simplify any surface — every material must retain its micro-texture detail.
+- Lighting must be physically re-calculated for the new viewpoint: correct shadows, specular highlights, ambient occlusion.
+- Hidden areas revealed by the new angle should be filled with materials that match existing surface textures exactly.
 - Architectural lines and vanishing points must be geometrically correct.
+- Surface interactions must be realistic: reflections, material-appropriate light absorption/scattering.
 ${colorContext}${qualitySuffix}`;
 
                 } else if (hasProduct) {
@@ -1203,6 +1356,9 @@ INTEGRATION REQUIREMENTS:
 - Product must cast realistic shadows consistent with the scene's light sources.
 - Scale must be physically accurate relative to surrounding objects.
 - Material reflections and surface interactions must be realistic.
+- Product material textures (fabric weave, leather grain, wood grain, metal finish) must be razor-sharp and fully detailed.
+- Scene material textures (floor, walls, props) must also show full micro-texture: wood grain, carpet pile, concrete pores, marble veining.
+- Do NOT over-smooth or digitally flatten any surface — tangible tactile quality on every material.
 ${qualitySuffix}`;
 
                 } else {
@@ -1244,7 +1400,8 @@ ${qualitySuffix}`;
 
                     generatedImageUrl = await kieGenerateImage(prompt, inputImages, {
                         aspectRatio: aspectRatio,
-                        resolution: resolution
+                        resolution: resolution,
+                        outputFormat: outputFormat
                     });
                 } else {
                     // === Google SDK (Master Mode) ===
@@ -1314,9 +1471,14 @@ ${qualitySuffix}`;
             console.error(`Error in task ${taskIndex}:`, error);
             const isEntityNotFoundError = error.message?.includes("Requested entity was not found");
             
-            const errMsg = isEntityNotFoundError 
-                ? "⚠️ API Key 无效或未选择。请重新选择您的付费项目 API Key。" 
-                : (error.message?.includes("503") ? "⚠️ 服务器繁忙 (503)，已自动重试多次失败。请稍后再试。" : "⚠️ 连接 Lyra 视觉中心失败。请检查您的 API Key 或网络连接。");
+            let errMsg: string;
+            if (isEntityNotFoundError) {
+                errMsg = "⚠️ API Key 无效或未选择。请重新选择您的付费项目 API Key。";
+            } else if (error.message?.includes("503")) {
+                errMsg = "⚠️ 服务器繁忙 (503)，已自动重试多次失败。请稍后再试。";
+            } else {
+                errMsg = `⚠️ 请求失败: ${error.message || '未知错误'}。请检查 API Key 或网络连接。`;
+            }
             
             if (isEntityNotFoundError && window.aistudio) {
                 setHasApiKey(false); 
@@ -1385,24 +1547,33 @@ ${qualitySuffix}`;
   };
 
   // === Drag & Drop / Reference helpers ===
-  const handleImageToInput = (imageUrl: string) => {
-    setPendingImages(prev => [...prev, imageUrl]);
+  const handleImageToInput = async (imageUrl: string) => {
+    const dataUri = await fetchImageAsDataUri(imageUrl);
+    setPendingImages(prev => [...prev, dataUri]);
   };
 
-  const handleImageToScene = (imageUrl: string) => {
-    setSceneRefImages(prev => [...prev, imageUrl]);
+  const handleImageToScene = async (imageUrl: string) => {
+    const dataUri = await fetchImageAsDataUri(imageUrl);
+    setSceneRefImages(prev => [...prev, dataUri]);
   };
 
-  // Convert remote URL to data URI for drag-drop from kie.ai images
+  // Convert remote URL to data URI (for reusing KIE.ai generated images)
   const fetchImageAsDataUri = async (url: string): Promise<string> => {
     if (url.startsWith('data:')) return url;
-    const resp = await fetch(url);
-    const blob = await resp.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.readAsDataURL(blob);
-    });
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('FileReader failed'));
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) {
+      console.warn('fetchImageAsDataUri failed:', e);
+      return url; // fallback: return original URL
+    }
   };
 
   const handleDropOnInput = async (e: React.DragEvent) => {
@@ -2059,6 +2230,14 @@ ${qualitySuffix}`;
                     <div className="flex gap-1">
                         {RESOLUTIONS.map((res) => (
                           <button key={res} onClick={() => setResolution(res)} className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium ${resolution === res ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}>{res}</button>
+                        ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                    <div className="px-2 text-slate-400 flex items-center gap-1"><ImageIcon size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">格式</span></div>
+                    <div className="flex gap-1">
+                        {OUTPUT_FORMATS.map((fmt) => (
+                          <button key={fmt} onClick={() => setOutputFormat(fmt as 'jpg' | 'png')} className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium uppercase ${outputFormat === fmt ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}>{fmt}</button>
                         ))}
                     </div>
                   </div>

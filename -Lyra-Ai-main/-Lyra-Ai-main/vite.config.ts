@@ -8,6 +8,20 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3002,
         host: '0.0.0.0',
+        proxy: {
+          '/kie-upload': {
+            target: 'https://kieai.redpandaai.co',
+            changeOrigin: true,
+            secure: false,
+            rewrite: (path: string) => path.replace(/^\/kie-upload/, ''),
+          },
+          '/kie-api': {
+            target: 'https://api.kie.ai',
+            changeOrigin: true,
+            secure: false,
+            rewrite: (path: string) => path.replace(/^\/kie-api/, ''),
+          },
+        },
       },
       plugins: [react()],
       define: {
