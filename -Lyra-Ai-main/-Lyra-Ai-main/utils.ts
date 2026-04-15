@@ -102,6 +102,36 @@ export const compositeImages = async (productBase64: string, backgroundUrl: stri
 };
 
 /**
+ * Convert a base64 data URI to the specified output format (jpg or png).
+ * If already in the target format, returns as-is.
+ */
+export const convertImageFormat = (dataUri: string, format: 'jpg' | 'png'): Promise<string> => {
+  const targetMime = format === 'png' ? 'image/png' : 'image/jpeg';
+  // If already correct format, return as-is
+  if (dataUri.startsWith(`data:${targetMime}`)) return Promise.resolve(dataUri);
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(dataUri); return; }
+      ctx.drawImage(img, 0, 0);
+      try {
+        const converted = canvas.toDataURL(targetMime, format === 'jpg' ? 0.92 : undefined);
+        resolve(converted);
+      } catch {
+        resolve(dataUri);
+      }
+    };
+    img.onerror = () => resolve(dataUri);
+    img.src = dataUri;
+  });
+};
+
+/**
  * Ensure a base64 data URI image is under the API size limit (7MB).
  * Only compresses if the image exceeds the limit; preserves original dimensions.
  */
