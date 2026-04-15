@@ -101,6 +101,55 @@ export const compositeImages = async (productBase64: string, backgroundUrl: stri
   });
 };
 
+/**
+ * Ensure a base64 data URI image is under the API size limit (7MB).
+ * Only compresses if the image exceeds the limit; preserves original dimensions.
+ */
+export const compressImageForApi = (dataUri: string, maxSizeBytes = 7 * 1024 * 1024): Promise<string> => {
+  // Quick check: estimate base64 decoded size (base64 is ~4/3 of raw)
+  const base64Part = dataUri.split(',')[1] || '';
+  const estimatedBytes = Math.round(base64Part.length * 3 / 4);
+  if (estimatedBytes <= maxSizeBytes) {
+    return Promise.resolve(dataUri); // Already under limit, no compression needed
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(dataUri); return; }
+      ctx.drawImage(img, 0, 0);
+
+      // Progressively reduce JPEG quality until under limit
+      let quality = 0.92;
+      let result = dataUri;
+      try {
+        while (quality >= 0.3) {
+          result = canvas.toDataURL('image/jpeg', quality);
+          const resultBase64 = result.split(',')[1] || '';
+          const resultBytes = Math.round(resultBase64.length * 3 / 4);
+          if (resultBytes <= maxSizeBytes) {
+            console.log(`Image compressed to fit API limit: ${Math.round(estimatedBytes / 1024)}KB -> ${Math.round(resultBytes / 1024)}KB (quality=${quality.toFixed(2)}, ${img.width}x${img.height})`);
+            resolve(result);
+            return;
+          }
+          quality -= 0.1;
+        }
+        // Last resort: return whatever we got at lowest quality
+        console.warn(`Image still over ${maxSizeBytes / (1024*1024)}MB after max compression, sending anyway.`);
+        resolve(result);
+      } catch {
+        resolve(dataUri);
+      }
+    };
+    img.onerror = () => resolve(dataUri);
+    img.src = dataUri;
+  });
+};
+
 // --- IndexedDB History Management ---
 import { Message } from './types';
 

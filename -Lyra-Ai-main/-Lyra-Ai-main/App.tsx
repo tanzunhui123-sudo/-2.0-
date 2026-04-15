@@ -17,7 +17,8 @@ import { Message, Mode } from './types';
 import { 
   saveMessageToDB, getHistoryFromDB, clearHistoryDB,
   initGapiClient, initGisClient, requestAccessToken, 
-  findHistoryFile, getFileContent, createHistoryFile, updateHistoryFile, DEFAULT_CLIENT_ID
+  findHistoryFile, getFileContent, createHistoryFile, updateHistoryFile, DEFAULT_CLIENT_ID,
+  compressImageForApi
 } from './utils';
 
 export default function App() {
@@ -705,8 +706,9 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
         } else {
             // === Google SDK path ===
             const ai = getAiClient();
-            const base64Data = sourceImageUrl.split(',')[1];
-            const mimeType = sourceImageUrl.split(';')[0].split(':')[1];
+            const compressed = await compressImageForApi(sourceImageUrl);
+            const base64Data = compressed.split(',')[1];
+            const mimeType = compressed.split(';')[0].split(':')[1];
 
             const parts: any[] = [
                 { inlineData: { mimeType, data: base64Data } }
@@ -802,7 +804,8 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
         } else {
             // === Google SDK path ===
             const ai = getAiClient();
-            const originalBase64 = inpaintTargetImage.split(',')[1];
+            const compressedOriginal = await compressImageForApi(inpaintTargetImage);
+            const originalBase64 = compressedOriginal.split(',')[1];
             const maskData = maskBase64.split(',')[1];
 
             const parts: any[] = [
@@ -813,8 +816,9 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
             let finalPrompt = '';
 
             if (materialImage) {
-                 const matBase64 = materialImage.split(',')[1];
-                 const matMime = materialImage.split(';')[0].split(':')[1];
+                 const compressedMat = await compressImageForApi(materialImage);
+                 const matBase64 = compressedMat.split(',')[1];
+                 const matMime = compressedMat.split(';')[0].split(':')[1];
                  parts.push({ inlineData: { mimeType: matMime, data: matBase64 } });
                  finalPrompt = `MATERIAL REPLACEMENT TASK:
                  
@@ -835,8 +839,9 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
                  - Do NOT over-smooth or flatten the material surface — natural surface variation and micro-imperfections add realism.
                  - High Fidelity, 8k Resolution, Photorealistic. Every texture must look tangible enough to touch.`;
             } else if (referenceImage) {
-                 const refBase64 = referenceImage.split(',')[1];
-                 const refMime = referenceImage.split(';')[0].split(':')[1];
+                 const compressedRef = await compressImageForApi(referenceImage);
+                 const refBase64 = compressedRef.split(',')[1];
+                 const refMime = compressedRef.split(';')[0].split(':')[1];
                  parts.push({ inlineData: { mimeType: refMime, data: refBase64 } });
                  finalPrompt = `EDITING TASK: Inpaint the masked area using the provided reference image.
                  
@@ -950,15 +955,16 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
     const ai = apiProvider !== 'kie' ? getAiClient() : null;
 
     // API Retry Wrapper (Google SDK only)
-    const generateWithRetry = async (model: string, params: any, retries = 3) => {
+    const generateWithRetry = async (model: string, params: any, retries = 5) => {
         for (let i = 0; i < retries; i++) {
             try {
                 return await ai!.models.generateContent({ model, ...params });
             } catch (error: any) {
-                const isRetryable = error.message?.includes('503') || error.message?.includes('Deadline expired') || error.status === 503;
+                const isRetryable = error.message?.includes('503') || error.message?.includes('429') || error.message?.includes('Deadline expired') || error.message?.includes('UNAVAILABLE') || error.status === 503 || error.status === 429;
                 if (isRetryable && i < retries - 1) {
-                    console.warn(`Request failed with 503/Timeout. Retrying (${i + 1}/${retries})...`);
-                    await new Promise(r => setTimeout(r, 2000 * Math.pow(2, i))); // Exponential backoff
+                    const delay = 3000 * Math.pow(2, i); // 3s -> 6s -> 12s -> 24s
+                    console.warn(`Request failed (${error.status || '503/Timeout'}). Retrying (${i + 1}/${retries}) after ${delay/1000}s...`);
+                    await new Promise(r => setTimeout(r, delay));
                     continue;
                 }
                 throw error;
@@ -1041,8 +1047,9 @@ You MUST structure your response exactly as follows:
                     // === Google SDK ===
                     const parts: any[] = [];
                     if (image) {
-                      const base64Data = image.split(',')[1];
-                      const mimeType = image.split(';')[0].split(':')[1];
+                      const compressed = await compressImageForApi(image);
+                      const base64Data = compressed.split(',')[1];
+                      const mimeType = compressed.split(';')[0].split(':')[1];
                       parts.push({ inlineData: { mimeType: mimeType, data: base64Data } });
                     }
                     parts.push({ text: promptText });
@@ -1171,16 +1178,18 @@ ${qualitySuffix}`;
                     });
                 } else {
                     const parts: any[] = [];
-                    currentImages.forEach(img => {
-                      const base64Data = img.split(',')[1];
-                      const mimeType = img.split(';')[0].split(':')[1];
+                    for (const img of currentImages) {
+                      const compressed = await compressImageForApi(img);
+                      const base64Data = compressed.split(',')[1];
+                      const mimeType = compressed.split(';')[0].split(':')[1];
                       parts.push({ inlineData: { mimeType: mimeType, data: base64Data } });
-                    });
-                    currentSceneRefs.forEach(ref => {
-                      const refBase64 = ref.split(',')[1];
-                      const refMime = ref.split(';')[0].split(':')[1];
+                    }
+                    for (const ref of currentSceneRefs) {
+                      const compressed = await compressImageForApi(ref);
+                      const refBase64 = compressed.split(',')[1];
+                      const refMime = compressed.split(';')[0].split(':')[1];
                       parts.push({ inlineData: { mimeType: refMime, data: refBase64 } });
-                    });
+                    }
                     parts.push({ text: prompt });
 
                     const response = await generateWithRetry(
@@ -1406,16 +1415,18 @@ ${qualitySuffix}`;
                 } else {
                     // === Google SDK (Master Mode) ===
                     const parts: any[] = [];
-                    currentImages.forEach(img => {
-                      const base64Data = img.split(',')[1];
-                      const mimeType = img.split(';')[0].split(':')[1];
+                    for (const img of currentImages) {
+                      const compressed = await compressImageForApi(img);
+                      const base64Data = compressed.split(',')[1];
+                      const mimeType = compressed.split(';')[0].split(':')[1];
                       parts.push({ inlineData: { mimeType: mimeType, data: base64Data } });
-                    });
-                    currentSceneRefs.forEach(ref => {
-                      const refBase64 = ref.split(',')[1];
-                      const refMime = ref.split(';')[0].split(':')[1];
+                    }
+                    for (const ref of currentSceneRefs) {
+                      const compressed = await compressImageForApi(ref);
+                      const refBase64 = compressed.split(',')[1];
+                      const refMime = compressed.split(';')[0].split(':')[1];
                       parts.push({ inlineData: { mimeType: refMime, data: refBase64 } });
-                    });
+                    }
                     parts.push({ text: prompt });
 
                     const response = await generateWithRetry(
@@ -1474,8 +1485,8 @@ ${qualitySuffix}`;
             let errMsg: string;
             if (isEntityNotFoundError) {
                 errMsg = "⚠️ API Key 无效或未选择。请重新选择您的付费项目 API Key。";
-            } else if (error.message?.includes("503")) {
-                errMsg = "⚠️ 服务器繁忙 (503)，已自动重试多次失败。请稍后再试。";
+            } else if (error.message?.includes("503") || error.message?.includes("UNAVAILABLE")) {
+                errMsg = "⚠️ Gemini 服务端暂时不可用 (503)，已自动重试5次均失败。预览版模型（Preview）容量有限，建议：\n1. 等待1-2分钟后重试\n2. 切换到稳定版模型（如 Gemini 2.5 Flash Image）\n3. 减少同时生成的图片数量";
             } else {
                 errMsg = `⚠️ 请求失败: ${error.message || '未知错误'}。请检查 API Key 或网络连接。`;
             }
@@ -1495,13 +1506,17 @@ ${qualitySuffix}`;
         }
     };
 
-    // --- 3. Execute Tasks ---
-    tasks.forEach((img, index) => {
-        // Stagger execution slightly to ensure state/id uniqueness and reduce instant load burst
-        setTimeout(() => {
-            processTask(img, index);
-        }, index * 200);
-    });
+    // --- 3. Execute Tasks (Sequential to avoid 503 overload) ---
+    const executeTasksSequentially = async () => {
+        for (let index = 0; index < tasks.length; index++) {
+            await processTask(tasks[index], index);
+            // Small delay between tasks to avoid rate limiting
+            if (index < tasks.length - 1) {
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+    };
+    executeTasksSequentially();
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
