@@ -42,10 +42,10 @@ export const ECOMMERCE_PLATFORMS: Record<EcommercePlatform, PlatformConfig> = {
     name: '淘宝/天猫',
     icon: '🛒',
     mainImageSizes: [
-      { label: '主图标准', width: 800, height: 800, ratio: '1:1', description: '淘宝标准主图' },
-      { label: '主图高清', width: 1500, height: 1500, ratio: '1:1', description: '天猫高清主图' },
-      { label: '长图主图', width: 800, height: 1200, ratio: '2:3', description: '搜索结果长图' },
-      { label: '透明主图', width: 800, height: 800, ratio: '1:1', description: '白底/透明底主图' },
+      { label: '主图标准', width: 800, height: 800, ratio: '1:1', description: '淘宝标准主图 800x800' },
+      { label: '主图高清', width: 1500, height: 1500, ratio: '1:1', description: '天猫高清主图 1500x1500' },
+      { label: '3:4主图', width: 900, height: 1200, ratio: '3:4', description: '搜索结果3:4竖图' },
+      { label: '9:16主图', width: 720, height: 1280, ratio: '9:16', description: '短视频/竖屏封面' },
     ],
     detailPageSizes: [
       { label: '详情页标准', width: 790, height: 1200, ratio: '790宽', description: '标准详情页宽度790px' },
