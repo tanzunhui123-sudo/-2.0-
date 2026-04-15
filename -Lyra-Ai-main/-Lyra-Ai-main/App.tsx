@@ -2292,49 +2292,96 @@ ${qualitySuffix}`;
                {/* Pending Images List - Horizontal Scroll */}
                {(pendingImages.length > 0 || sceneRefImages.length > 0) && (
                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                       {/* Scene/Material Reference Images Preview */}
-                       {sceneRefImages.map((refImg, idx) => (
-                           <div key={`scene-${idx}`} className="relative group flex-shrink-0 animate-in slide-in-from-bottom-2 fade-in duration-300" style={{ animationDelay: `${idx * 50}ms` }}>
-                               <div className={`w-20 h-20 rounded-xl overflow-hidden border-2 ${mode === 'reskin' ? 'border-amber-400' : 'border-purple-400'} shadow-md bg-white relative`}>
-                                  <img src={refImg} alt={`Ref ${idx + 1}`} className="w-full h-full object-cover" />
-                                  <div className={`absolute inset-0 ${mode === 'reskin' ? 'bg-amber-500/10' : 'bg-purple-500/10'} pointer-events-none`}></div>
+                       {/* In reskin mode: show 原图 FIRST (left), then 面料参考 (right) to match API order */}
+                       {/* In other modes: show scene refs first, then products */}
+                       
+                       {mode === 'reskin' ? (
+                         <>
+                           {/* Reskin: Product/Original Images FIRST (left) */}
+                           {pendingImages.map((img, idx) => (
+                               <div key={idx} className="relative group flex-shrink-0 animate-in slide-in-from-bottom-2 fade-in duration-300" style={{ animationDelay: `${idx * 50}ms` }}>
+                                   <div className="w-20 h-20 rounded-xl overflow-hidden border-2 border-indigo-400 shadow-md bg-white">
+                                      <img src={img} alt={`Original ${idx}`} className="w-full h-full object-contain" />
+                                   </div>
+                                   <button 
+                                     onClick={() => handleRemoveImage(idx)} 
+                                     className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full shadow-sm hover:bg-red-600 transition-colors z-10"
+                                   >
+                                      <X size={12} />
+                                   </button>
+                                   <div className="absolute bottom-0 left-0 right-0 bg-indigo-600/90 text-[10px] text-white text-center py-0.5 font-medium">原图</div>
                                </div>
-                               <button 
-                                 onClick={() => setSceneRefImages(prev => prev.filter((_, i) => i !== idx))} 
-                                 className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full shadow-sm hover:bg-red-600 transition-colors z-10"
-                               >
-                                  <X size={12} />
-                               </button>
-                               <div className={`absolute bottom-0 left-0 right-0 ${mode === 'reskin' ? 'bg-amber-600/90' : 'bg-purple-600/90'} text-[10px] text-white text-center py-0.5 font-medium`}>{mode === 'reskin' ? (sceneRefImages.length > 1 ? `面料 ${idx + 1}` : '面料参考') : (sceneRefImages.length > 1 ? `场景 ${idx + 1}` : '场景参考')}</div>
-                           </div>
-                       ))}
+                           ))}
 
-                       {/* Separator if both exist */}
-                       {sceneRefImages.length > 0 && pendingImages.length > 0 && (
-                          <div className="w-px bg-slate-300 dark:bg-slate-700 mx-1 h-20 self-center"></div>
+                           {/* Separator */}
+                           {sceneRefImages.length > 0 && pendingImages.length > 0 && (
+                              <div className="w-px bg-slate-300 dark:bg-slate-700 mx-1 h-20 self-center"></div>
+                           )}
+
+                           {/* Reskin: Material Reference Images SECOND (right) */}
+                           {sceneRefImages.map((refImg, idx) => (
+                               <div key={`scene-${idx}`} className="relative group flex-shrink-0 animate-in slide-in-from-bottom-2 fade-in duration-300" style={{ animationDelay: `${idx * 50}ms` }}>
+                                   <div className="w-20 h-20 rounded-xl overflow-hidden border-2 border-amber-400 shadow-md bg-white relative">
+                                      <img src={refImg} alt={`Material ${idx + 1}`} className="w-full h-full object-cover" />
+                                      <div className="absolute inset-0 bg-amber-500/10 pointer-events-none"></div>
+                                   </div>
+                                   <button 
+                                     onClick={() => setSceneRefImages(prev => prev.filter((_, i) => i !== idx))} 
+                                     className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full shadow-sm hover:bg-red-600 transition-colors z-10"
+                                   >
+                                      <X size={12} />
+                                   </button>
+                                   <div className="absolute bottom-0 left-0 right-0 bg-amber-600/90 text-[10px] text-white text-center py-0.5 font-medium">{sceneRefImages.length > 1 ? `面料 ${idx + 1}` : '面料参考'}</div>
+                               </div>
+                           ))}
+                         </>
+                       ) : (
+                         <>
+                           {/* Non-reskin: Scene refs first, then products (original order) */}
+                           {sceneRefImages.map((refImg, idx) => (
+                               <div key={`scene-${idx}`} className="relative group flex-shrink-0 animate-in slide-in-from-bottom-2 fade-in duration-300" style={{ animationDelay: `${idx * 50}ms` }}>
+                                   <div className="w-20 h-20 rounded-xl overflow-hidden border-2 border-purple-400 shadow-md bg-white relative">
+                                      <img src={refImg} alt={`Ref ${idx + 1}`} className="w-full h-full object-cover" />
+                                      <div className="absolute inset-0 bg-purple-500/10 pointer-events-none"></div>
+                                   </div>
+                                   <button 
+                                     onClick={() => setSceneRefImages(prev => prev.filter((_, i) => i !== idx))} 
+                                     className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full shadow-sm hover:bg-red-600 transition-colors z-10"
+                                   >
+                                      <X size={12} />
+                                   </button>
+                                   <div className="absolute bottom-0 left-0 right-0 bg-purple-600/90 text-[10px] text-white text-center py-0.5 font-medium">{sceneRefImages.length > 1 ? `场景 ${idx + 1}` : '场景参考'}</div>
+                               </div>
+                           ))}
+
+                           {/* Separator */}
+                           {sceneRefImages.length > 0 && pendingImages.length > 0 && (
+                              <div className="w-px bg-slate-300 dark:bg-slate-700 mx-1 h-20 self-center"></div>
+                           )}
+
+                           {/* Non-reskin: Product Images */}
+                           {pendingImages.map((img, idx) => (
+                               <div key={idx} className="relative group flex-shrink-0 animate-in slide-in-from-bottom-2 fade-in duration-300" style={{ animationDelay: `${idx * 50}ms` }}>
+                                   <div className="w-20 h-20 rounded-xl overflow-hidden border border-indigo-200 shadow-md bg-white">
+                                      <img src={img} alt={`Pending ${idx}`} className="w-full h-full object-contain" />
+                                   </div>
+                                   <button 
+                                     onClick={() => handleRemoveImage(idx)} 
+                                     className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full shadow-sm hover:bg-red-600 transition-colors z-10"
+                                   >
+                                      <X size={12} />
+                                   </button>
+                                   <div className="absolute bottom-0 left-0 right-0 bg-indigo-600/90 text-[10px] text-white text-center py-0.5 font-medium">{`产品 ${idx + 1}`}</div>
+                               </div>
+                           ))}
+                         </>
                        )}
-
-                       {/* Product Images */}
-                       {pendingImages.map((img, idx) => (
-                           <div key={idx} className="relative group flex-shrink-0 animate-in slide-in-from-bottom-2 fade-in duration-300" style={{ animationDelay: `${idx * 50}ms` }}>
-                               <div className="w-20 h-20 rounded-xl overflow-hidden border border-indigo-200 shadow-md bg-white">
-                                  <img src={img} alt={`Pending ${idx}`} className="w-full h-full object-contain" />
-                               </div>
-                               <button 
-                                 onClick={() => handleRemoveImage(idx)} 
-                                 className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full shadow-sm hover:bg-red-600 transition-colors z-10"
-                               >
-                                  <X size={12} />
-                               </button>
-                               <div className="absolute bottom-0 left-0 right-0 bg-indigo-600/90 text-[10px] text-white text-center py-0.5 font-medium">{mode === 'reskin' ? '原图' : `产品 ${idx + 1}`}</div>
-                           </div>
-                       ))}
                        
                        {/* Add more products button */}
                        <button 
                          onClick={() => fileInputRef.current?.click()}
                          className="w-20 h-20 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center text-slate-400 hover:text-indigo-500 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 transition-all flex-shrink-0"
-                         title="添加更多产品图"
+                         title={mode === 'reskin' ? "添加原图（要换色的产品图）" : "添加更多产品图"}
                        >
                            <Plus size={24} />
                        </button>
@@ -2415,7 +2462,7 @@ ${qualitySuffix}`;
                   <button 
                     onClick={() => fileInputRef.current?.click()} 
                     className={`p-3 rounded-xl transition-all shadow-sm border border-transparent relative ${pendingImages.length > 0 ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'text-slate-500 hover:text-indigo-600 hover:bg-white dark:hover:bg-slate-800 hover:border-slate-200'}`} 
-                    title="上传产品图 (支持多选)"
+                    title={mode === 'reskin' ? "① 上传原图（要换色的产品图）" : "上传产品图 (支持多选)"}
                   >
                     {pendingImages.length > 0 ? <Layers size={20} /> : <ImageIcon size={20} />}
                     {pendingImages.length > 1 && (
@@ -2433,7 +2480,7 @@ ${qualitySuffix}`;
                         onDragOver={(e) => { preventDragDefault(e); e.currentTarget.classList.add('ring-2', 'ring-purple-400', 'bg-purple-50'); }}
                         onDragLeave={(e) => { e.currentTarget.classList.remove('ring-2', 'ring-purple-400', 'bg-purple-50'); }}
                         className={`p-3 rounded-xl transition-all shadow-sm border border-transparent relative ${sceneRefImages.length > 0 ? (mode === 'reskin' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-purple-50 text-purple-600 border-purple-200') : 'text-slate-500 hover:text-purple-600 hover:bg-white dark:hover:bg-slate-800 hover:border-slate-200'}`} 
-                        title={mode === 'reskin' ? "上传颜色/面料参考图 (要替换成的目标颜色/面料)" : "上传场景/风格参考图 (支持多张，可拖拽)"}
+                        title={mode === 'reskin' ? "② 上传面料参考图（要替换成的目标颜色/面料）" : "上传场景/风格参考图 (支持多张，可拖拽)"}
                        >
                         {mode === 'reskin' ? <Pipette size={20} /> : <ImagePlus size={20} />}
                         {sceneRefImages.length > 0 && (
