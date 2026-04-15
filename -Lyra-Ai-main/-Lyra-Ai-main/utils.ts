@@ -1,28 +1,58 @@
 /**
  * Generates a mock analysis response based on selected parameters.
  */
-export const generateMockAnalysisResponse = (mode: string, aspectRatio: string, resolution: string, viewAngle: string) => `### Step 1: 视觉解析 (Visual Analysis)
-基于您上传的图片，我已完成深度拆解：
+export const generateMockAnalysisResponse = (mode: string, aspectRatio: string, resolution: string, viewAngle: string) => `### 1. 视觉深度解析 (Deep Visual Analysis)
+识别为一款**现代侘寂风 (Wabi-sabi)** L型落地沙发场景。核心视觉杀手锏：**宽条纹灯芯绒的极致触感纹理**与**斑驳自然光影**形成的张力。AI复刻挑战点：需锁定灯芯绒的坑条纹理细节与金属框架的哑光质感，防止AI生成"塑料感"。
 
-1. **核心主体 (The Subject):** 识别为一款现代 L 型落地沙发。材质为极具触感的**宽条纹灰色灯芯绒 (Wide-wale Grey Corduroy)**，纹理清晰立体。
-2. **关键细节:** 靠背带有经典的拉扣 (Tufting) 设计；扶手外侧包裹着独特的**纤细金属框架**，且侧面设计有实用的**储物口袋**。
-3. **风格定位:** 结合了现代工业风的利落与复古居家风的慵懒，适合营造 Modern Cozy 氛围。
+### 2. 生成提示词 (Prompts)
 
-### Step 2: 生成结构化提示词
-
+**【English Prompt】(For AI Image Generation — copy this directly)**
 \`\`\`markdown
-专业室内摄影，现代舒适居家风格，${resolution}超清画质，光影质感。
+(Core Subject)
+Large L-shaped modular sofa, wide-wale grey corduroy fabric, extremely plush and tactile texture with visible ribbed weave, matte finish. Back cushions with classic tufting design. Distinctive dark metallic tubular frame wrapping around the armrests, with functional side storage pockets. EXACTLY AS SHOWN IN REFERENCE IMAGE.
 
-(核心主体)：一款大型 L 型转角沙发，全包覆宽条纹灰色灯芯绒面料，质感蓬松柔软。靠垫带有拉扣 tufting 设计。独特的深色细金属框架包裹扶手外侧，扶手侧面带有实用的储物口袋细节。
+(Human Presence & Action)
+Candid lifestyle snapshot: A young Caucasian woman in an oversized cream knit sweater, casually curled up on the chaise section, body weight naturally sinking into the plush cushion creating realistic deformation. She is lazily reading a magazine with a warm ceramic mug nearby. Unposed, effortless, authentic lived-in feel.
 
-(构图与视角)：35mm 镜头，${viewAngle}，聚焦沙发材质细节与整体形态。 --ar ${aspectRatio}
+(Camera & Composition)
+Eye-level mid-wide shot, ${viewAngle}, 3/4 front-side perspective. Clean expansive negative space on the upper left wall area for e-commerce A+ typography. --ar ${aspectRatio}
 
-(环境背景)：${mode === 'remix' ? '保持产品主体不变，将背景替换为阳光房。' : '构建一个温暖的现代客厅场景。浅色橡木地板，米灰色微水泥墙面，大落地窗配白色透光纱帘。'}
+(Environment)
+${mode === 'remix' ? 'Maintain product as-is, replace background with sunlit conservatory.' : 'Open-concept modern apartment, warm sand-colored hand-plastered limewash walls with subtle micro-texture, natural light oak wide-plank flooring, panoramic windows on the right.'}
 
-(氛围与照明系统)：温暖的午后侧逆光 (Side-back lighting)，强调灯芯绒的绒毛感与金属框架的哑光光泽。
+(Lighting)
+Warm afternoon natural sunlight streaming diagonally, casting dappled tree-branch shadows on the textured wall. Natural light falloff gently brushing across the corduroy ribs, emphasizing plush volume. Atmospheric dust motes slightly visible.
 
-(配套软装)：圆形实木茶几，极简陶瓷花瓶，一本翻开的杂志，背景处有一株琴叶榕绿植。
+(Props)
+Minimalist travertine round coffee table to the right foreground (shifted to avoid blocking sofa). Fluffy cream Berber rug under the sofa. A rustic ceramic vase with dried pampas grass in the background. Casually draped knit throw blanket on the armrest.
+
+(Quality & Render)
+RAW photo, un-retouched, shot on Fujifilm GFX 100S, 50mm lens, f/4.0 aperture, ultra-photorealistic, Architectural Digest style. Natural film grain, extremely sharp focus on fabric weave and metal frame. STRICTLY NO CGI.
+
+[Control Strict Rules]: 1. MANDATORY ${viewAngle} perspective lock; 2. Strictly preserve corduroy texture and metallic frame details; 3. MANDATORY negative space on upper left wall; 4. Foreground props MUST NOT obstruct core product; 5. STRICTLY NO plastic/CGI look.
 \`\`\`
+
+**【中文翻译与审阅版】(For Team Review)**
+\`\`\`markdown
+(核心主体) 大型L型模块沙发，宽条纹灰色灯芯绒面料，**肉眼可见的坑条编织纹理，哑光质感**。靠背带拉扣设计。**独特深色金属管状框架**环绕扶手，带侧面储物袋。**完全与参考图一致**。
+
+(人物与动作) 真实抓拍：年轻欧美女性，穿宽松奶油色针织毛衣，**随意蜷缩在贵妃榻上，身体重量自然下沉产生坐垫凹陷**。慵懒地翻阅杂志，旁边放着陶瓷马克杯。松弛、自然、不做作。
+
+(镜头与构图) **平视中远景**，${viewAngle}，3/4前侧透视。**左上方墙面大面积留白**供电商排版。--ar ${aspectRatio}
+
+(环境硬装) ${mode === 'remix' ? '保持产品不变，背景替换为阳光房。' : '开放式现代公寓，温暖的沙色**手工灰泥水洗墙面**带微肌理，天然浅色橡木宽板地板，右侧全景窗。'}
+
+(光影氛围) 午后暖阳斜射，**在纹理墙面投射斑驳树影**。自然光衰减柔和地扫过灯芯绒坑条，凸显蓬松体积感。大气尘埃微粒隐约可见。
+
+(软装道具) 极简洞石圆形茶几偏右前方（**刻意避开沙发正面视线**）。沙发下铺蓬松奶油色柏柏尔地毯。背景有质朴陶瓷花瓶插干芦苇草。扶手上随意搭放针织毯。
+
+(画质与渲染) **RAW原片，未精修，富士GFX 100S中画幅，50mm镜头，f/4.0**。Architectural Digest杂志风。自然胶片颗粒感，**严禁CGI**。
+
+[严苛控制规则]: 1. **强制锁定${viewAngle}透视**；2. 严格还原灯芯绒纹理与金属框架；3. **强制左上方大面积留白**；4. 前景道具不可遮挡产品主体；5. 严禁塑料感/CGI渲染。
+\`\`\`
+
+### 3. 架构师调度简报
+启用了**"反塑料感引擎"**将画质参数从UE5切换为中画幅实拍参数；同时启用**"留白引擎"**在左上方预留A+排版空间，**"防翻车引擎"**将茶几偏移至右前方以防遮挡产品正面视线。
 `;
 
 /**
