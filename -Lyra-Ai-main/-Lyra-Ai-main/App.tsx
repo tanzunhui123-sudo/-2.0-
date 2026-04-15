@@ -716,16 +716,17 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
 
             let config = {};
 
+            const outputMime = outputFormat === 'png' ? 'image/png' : 'image/jpeg';
             if (type === 'upscale') {
                 parts.push({ text: "Upscale this image to 4K resolution. Significantly enhance sharpness, material texture micro-details, and clarity. Preserve the original subject, composition, and colors. Every material surface must gain visible texture detail: fabric must show thread weave patterns, leather must show grain pores, wood must show grain lines, metal must show finish quality. Do NOT over-smooth any surface — enhance natural micro-texture and surface variation. High Fidelity, photorealistic." });
                 const ratio = await getClosestAspectRatio(sourceImageUrl);
                 config = {
-                    imageConfig: { imageSize: '4K', aspectRatio: ratio }
+                    imageConfig: { imageSize: '4K', aspectRatio: ratio, outputMimeType: outputMime }
                 };
             } else {
                 parts.push({ text: `Outpaint and expand this image to fit the ${targetRatio} aspect ratio. Generate coherent and realistic background content for the empty space that seamlessly matches the original lighting, style, and perspective.` });
                 config = {
-                    imageConfig: { imageSize: '2K', aspectRatio: targetRatio }
+                    imageConfig: { imageSize: '2K', aspectRatio: targetRatio, outputMimeType: outputMime }
                 };
             }
 
@@ -738,7 +739,8 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
             if (response.candidates?.[0]?.content?.parts) {
                 for (const part of response.candidates[0].content.parts) {
                     if (part.inlineData) {
-                        generatedImageUrl = `data:image/png;base64,${part.inlineData.data}`;
+                        const mime = part.inlineData.mimeType || (outputFormat === 'png' ? 'image/png' : 'image/jpeg');
+                        generatedImageUrl = `data:${mime};base64,${part.inlineData.data}`;
                     }
                 }
             }
@@ -866,13 +868,14 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
             const response = await ai.models.generateContent({
               model: selectedImageModel, 
               contents: { parts },
-              config: { imageConfig: { aspectRatio: targetAspectRatio, imageSize: '2K' } }
+              config: { imageConfig: { aspectRatio: targetAspectRatio, imageSize: '2K', outputMimeType: outputFormat === 'png' ? 'image/png' : 'image/jpeg' } }
             });
 
             if (response.candidates?.[0]?.content?.parts) {
                 for (const part of response.candidates[0].content.parts) {
                     if (part.inlineData) {
-                        generatedImageUrl = `data:image/png;base64,${part.inlineData.data}`;
+                        const mime = part.inlineData.mimeType || (outputFormat === 'png' ? 'image/png' : 'image/jpeg');
+                        generatedImageUrl = `data:${mime};base64,${part.inlineData.data}`;
                     }
                 }
             }
@@ -1199,7 +1202,8 @@ ${qualitySuffix}`;
                             config: {
                                 imageConfig: {
                                     aspectRatio: aspectRatio,
-                                    imageSize: resolution 
+                                    imageSize: resolution,
+                                    outputMimeType: outputFormat === 'png' ? 'image/png' : 'image/jpeg'
                                 }
                             }
                         }
@@ -1208,7 +1212,8 @@ ${qualitySuffix}`;
                     if (response?.candidates?.[0]?.content?.parts) {
                         for (const part of response.candidates[0].content.parts) {
                             if (part.inlineData) {
-                                generatedImageUrl = `data:image/png;base64,${part.inlineData.data}`;
+                                const mime = part.inlineData.mimeType || (outputFormat === 'png' ? 'image/png' : 'image/jpeg');
+                                generatedImageUrl = `data:${mime};base64,${part.inlineData.data}`;
                             } else if (part.text) {
                                 textResponse = part.text;
                             }
@@ -1436,7 +1441,8 @@ ${qualitySuffix}`;
                             config: {
                                 imageConfig: {
                                     aspectRatio: aspectRatio,
-                                    imageSize: resolution 
+                                    imageSize: resolution,
+                                    outputMimeType: outputFormat === 'png' ? 'image/png' : 'image/jpeg'
                                 }
                             }
                         }
@@ -1445,7 +1451,8 @@ ${qualitySuffix}`;
                     if (response?.candidates?.[0]?.content?.parts) {
                         for (const part of response.candidates[0].content.parts) {
                             if (part.inlineData) {
-                                generatedImageUrl = `data:image/png;base64,${part.inlineData.data}`;
+                                const mime = part.inlineData.mimeType || (outputFormat === 'png' ? 'image/png' : 'image/jpeg');
+                                generatedImageUrl = `data:${mime};base64,${part.inlineData.data}`;
                             } else if (part.text) {
                                 textResponse += part.text;
                             }
