@@ -162,6 +162,71 @@ export const convertImageFormat = (dataUri: string, format: 'jpg' | 'png'): Prom
 };
 
 /**
+ * Extract the center region of an image for texture detail emphasis.
+ * Returns a cropped PNG data URI of the center portion at full resolution.
+ */
+export const extractTextureCrop = (dataUri: string, cropRatio = 0.4): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const cropW = Math.round(img.width * cropRatio);
+      const cropH = Math.round(img.height * cropRatio);
+      const x = Math.round((img.width - cropW) / 2);
+      const y = Math.round((img.height - cropH) / 2);
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = cropW;
+      canvas.height = cropH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(dataUri); return; }
+      
+      ctx.drawImage(img, x, y, cropW, cropH, 0, 0, cropW, cropH);
+      try {
+        resolve(canvas.toDataURL('image/png'));
+      } catch {
+        resolve(dataUri);
+      }
+    };
+    img.onerror = () => resolve(dataUri);
+    img.src = dataUri;
+  });
+};
+
+/**
+ * Compress image for API while preserving PNG format for texture references.
+ * Uses PNG compression for material swatches to avoid JPEG texture degradation.
+ */
+export const compressImagePreservePng = (dataUri: string, maxSizeBytes = 7 * 1024 * 1024): Promise<string> => {
+  const base64Part = dataUri.split(',')[1] || '';
+  const estimatedBytes = Math.round(base64Part.length * 3 / 4);
+  if (estimatedBytes <= maxSizeBytes) return Promise.resolve(dataUri);
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      // Scale down if needed rather than lossy JPEG compression
+      let w = img.width, h = img.height;
+      const ratio = Math.sqrt(maxSizeBytes / estimatedBytes) * 0.9;
+      if (ratio < 1) { w = Math.round(w * ratio); h = Math.round(h * ratio); }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(dataUri); return; }
+      ctx.drawImage(img, 0, 0, w, h);
+      try {
+        const result = canvas.toDataURL('image/png');
+        resolve(result);
+      } catch {
+        resolve(dataUri);
+      }
+    };
+    img.onerror = () => resolve(dataUri);
+    img.src = dataUri;
+  });
+};
+
+/**
  * Ensure a base64 data URI image is under the API size limit (7MB).
  * Only compresses if the image exceeds the limit; preserves original dimensions.
  */

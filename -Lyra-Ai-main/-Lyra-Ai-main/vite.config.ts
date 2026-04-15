@@ -8,6 +8,10 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3002,
         host: '0.0.0.0',
+        hmr: {
+          clientPort: 443,
+        },
+        allowedHosts: 'all',
         proxy: {
           '/kie-upload': {
             target: 'https://kieai.redpandaai.co',

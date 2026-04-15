@@ -18,7 +18,7 @@ import {
   saveMessageToDB, getHistoryFromDB, clearHistoryDB,
   initGapiClient, initGisClient, requestAccessToken, 
   findHistoryFile, getFileContent, createHistoryFile, updateHistoryFile, DEFAULT_CLIENT_ID,
-  compressImageForApi, convertImageFormat
+  compressImageForApi, convertImageFormat, extractTextureCrop, compressImagePreservePng
 } from './utils';
 
 export default function App() {
@@ -795,7 +795,16 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
             const allImages = [inpaintTargetImage, maskBase64];
             if (materialImage) {
                 allImages.push(materialImage);
-                finalPrompt = `MATERIAL REPLACEMENT: ${prompt}. Replace the masked area material with the EXACT texture from the reference image. Reproduce the reference material's weave pattern, grain, surface roughness, and micro-texture detail. The new material must interact realistically with existing lighting (shadows, highlights, ambient occlusion). Do NOT smooth or flatten the surface — maintain tangible tactile quality. Photorealistic.`;
+                finalPrompt = `MATERIAL TEXTURE REPLACEMENT in masked area: ${prompt}.
+
+CRITICAL TEXTURE REQUIREMENTS:
+- Replace the masked area's material with the EXACT texture from the reference image.
+- COPY the reference material's weave/grain pattern exactly — same thread structure, fiber density, surface characteristics. Do NOT simplify or smooth.
+- Color must have DEPTH and VARIATION matching the reference — real materials are never one flat color. Reproduce lighter/darker areas from fiber direction and light angle.
+- Recalculate light interaction: matte fabrics absorb softly with gradual shadows, velvet/chenille show directional sheen, leather shows specular highlights.
+- Texture must wrap around the object's 3D form naturally — stretched on curves, compressed in folds.
+- Shadows in folds show DARKER tone of the material, not black voids.
+- Do NOT smooth or flatten — maintain visible individual fibers/yarns/grain. Photorealistic, 8K.`;
             } else if (referenceImage) {
                 allImages.push(referenceImage);
                 finalPrompt = `INPAINT with reference: ${prompt}. Place the person/character from the reference into the masked area. Match lighting and perspective.`;
@@ -818,28 +827,49 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
             let finalPrompt = '';
 
             if (materialImage) {
-                 const compressedMat = await compressImageForApi(materialImage);
+                 // Preserve PNG for texture reference quality
+                 const compressedMat = await compressImagePreservePng(materialImage);
                  const matBase64 = compressedMat.split(',')[1];
                  const matMime = compressedMat.split(';')[0].split(':')[1];
                  parts.push({ inlineData: { mimeType: matMime, data: matBase64 } });
-                 finalPrompt = `MATERIAL REPLACEMENT TASK:
                  
-                 IMAGES:
-                 1. Target Image (Scene/Object)
-                 2. Mask Image (White = Area to replace)
-                 3. TEXTURE REFERENCE (Material Swatch/Photo)
+                 // Add center crop for micro-texture detail
+                 try {
+                   const textureCrop = await extractTextureCrop(materialImage, 0.4);
+                   const cropCompressed = await compressImagePreservePng(textureCrop);
+                   const cropBase64 = cropCompressed.split(',')[1];
+                   const cropMime = cropCompressed.split(';')[0].split(':')[1];
+                   parts.push({ inlineData: { mimeType: cropMime, data: cropBase64 } });
+                 } catch (e) { console.warn("Texture crop failed:", e); }
                  
-                 INSTRUCTION: ${prompt}
-                 
-                 CRITICAL PHYSICS SIMULATION:
-                 - Replace the material in the masked area with the EXACT material from Image 3.
-                 - Reproduce the reference material's EXACT weave pattern, thread density, surface grain, and micro-texture at correct scale.
-                 - Synthesize the new material's physical properties: Diffuse reflection, Specularity, Roughness, and Micro-texture (e.g. fabric weave crossings, individual fibers, leather grain pores, wood grain lines).
-                 - The new material must interact realistically with the existing lighting environment of Image 1 (Shadows, Highlights, AO, specular response).
-                 - Fabric must deform naturally over underlying geometry: stretched on convex surfaces, compressed in folds/creases.
-                 - Preserve the underlying geometry and folds if applicable, but fully replace the surface shader.
-                 - Do NOT over-smooth or flatten the material surface — natural surface variation and micro-imperfections add realism.
-                 - High Fidelity, 8k Resolution, Photorealistic. Every texture must look tangible enough to touch.`;
+                 finalPrompt = `MATERIAL TEXTURE REPLACEMENT IN MASKED AREA
+
+IMAGES:
+1. Target scene/product image
+2. Mask (white = area to replace)
+3. Material texture reference (full view)
+4. Material texture close-up (zoomed center crop — study this for micro-texture detail)
+
+INSTRUCTION: ${prompt}
+
+TEXTURE REPRODUCTION (TOP PRIORITY):
+- COPY the EXACT texture from the reference: same weave structure, yarn/fiber density, surface grain pattern. Do NOT simplify.
+- Show INDIVIDUAL FIBER/YARN DETAIL — every thread crossing, fiber tuft, and surface irregularity from the reference.
+- Color must have DEPTH and VARIATION matching the reference — lighter on raised fibers, darker in valleys. Never flat/uniform.
+- Scale the texture pattern correctly relative to the object's real-world size.
+
+LIGHT INTERACTION:
+- Recalculate how the scene's lighting hits the new material's surface properties.
+- Matte/plush: soft absorption, gradual shadow transitions, no sharp highlights.
+- Velvet/chenille: directional sheen where fibers lean toward light.
+- Shadows in folds: darker tone of same material (compressed fibers), not black.
+
+3D MAPPING:
+- Texture wraps around underlying geometry naturally.
+- Stretched on convex surfaces, compressed in folds/creases.
+- Preserve underlying form and fold structure, only replace the surface material.
+
+Do NOT smooth or flatten. Do NOT over-simplify. Photorealistic, 8K. Every fiber must be visible.`;
             } else if (referenceImage) {
                  const compressedRef = await compressImageForApi(referenceImage);
                  const refBase64 = compressedRef.split(',')[1];
@@ -1125,85 +1155,17 @@ You MUST output TWO physically separate sections: English prompt for AI generati
                 });
 
             } else if (mode === 'reskin') {
-                // --- Reskin Mode (换色换料) ---
+                // --- Reskin Mode (换色换料) --- OPTIMIZED for texture fidelity
                 const hasOriginal = currentImages.length > 0;
                 const hasMaterialRef = currentSceneRefs.length > 0;
                 const userInput = currentInput || "";
 
-                const qualitySuffix = "\n\nPHOTO QUALITY: Shot on Sony A7R V with 85mm f/1.4 GM lens. Natural ambient lighting with soft fill. RAW-quality color depth, fine grain texture, true-to-life material rendering. 8K resolution, professional color grading. The final image must be indistinguishable from a real professional photograph.\n\nMATERIAL REALISM MANDATE: Every visible surface must show its real-world micro-texture at full resolution. Fabric must show individual thread weave patterns and fiber detail. Leather must show grain pores and natural surface variation. Wood must show grain lines and annual ring patterns. Metal must show brushed finish or reflection quality appropriate to its type. Do NOT over-smooth, blur, or digitally flatten ANY surface. Surface imperfections (slight fabric pilling, minor grain variation, natural material inconsistency) add realism and MUST be present.";
-
                 let prompt = "";
-
-                if (hasOriginal && hasMaterialRef) {
-                    // 有原图 + 面料/颜色参考图
-                    prompt = `You are an expert product material and color replacement specialist.
-
-INPUTS:
-- Image 1: THE ORIGINAL PRODUCT IMAGE (this is the source image — preserve its exact composition, camera angle, lighting, background, shadows, and all scene elements EXACTLY as they are. Only the product's surface material/color/texture should change).
-- Image 2: THE MATERIAL/COLOR REFERENCE (this image shows the TARGET color, fabric, texture, or material pattern that should be applied to the product in Image 1).
-
-${userInput ? `USER INSTRUCTIONS: "${userInput}" — Read carefully and follow precisely. The user may specify which part of the product to change, or provide additional details.` : ''}
-
-PRIMARY TASK — MATERIAL/COLOR REPLACEMENT:
-Replace ONLY the surface material, color, fabric, or texture of the main product/subject in Image 1 with the material/color/texture shown in Image 2.
-
-Step 1: ANALYZE THE ORIGINAL IMAGE
-- Identify the main product/subject in Image 1
-- Map out which surfaces belong to the product (upholstery, fabric panels, leather surfaces, painted surfaces, etc.)
-- Note the exact camera angle, lighting direction, shadow patterns, background, and surrounding elements
-
-Step 2: ANALYZE THE MATERIAL REFERENCE
-- Extract the target color, hue, saturation, and brightness from Image 2
-- Identify the material type (fabric, leather, velvet, linen, wood grain, metal finish, etc.)
-- Note the texture pattern, weave, grain direction, and surface characteristics
-
-Step 3: APPLY THE REPLACEMENT
-- Replace the product's surface material/color/texture with the reference material
-- The material must wrap naturally around the product's 3D form, following its contours and seams
-- Texture scale must be realistic relative to the product's size
-- Reproduce the EXACT weave pattern, thread density, fiber detail, and surface grain from the reference material
-- Fabric wrinkles, creases, and folds must deform the texture pattern naturally — stretched on convex surfaces, compressed in folds
-- Lighting interactions must be recalculated: matte fabrics absorb light with soft gradients, velvet has directional sheen, leather shows specular highlights, linen has subtle translucency at edges
-- Shadows, creases, and folds in the fabric must look natural for the new material type
-- The replaced material must show micro-texture details: individual fibers, weave crossings, grain pores, or surface roughness variation
-- Do NOT over-smooth or flatten any surface — natural material inconsistencies add realism
-
-CRITICAL RULES:
-- DO NOT change the product's shape, size, silhouette, or proportions
-- DO NOT change the camera angle, composition, or framing
-- DO NOT change the background, surrounding objects, or any non-product elements
-- DO NOT change structural elements like legs, frames, buttons, zippers, or hardware — only the surface material/fabric/color
-- Preserve all seam lines, stitching patterns, and construction details — just change the material covering them
-- The lighting and shadow response must be physically accurate for the new material type
-${userInput ? `\nADDITIONAL USER REQUIREMENTS: ${userInput}` : ''}
-${qualitySuffix}`;
-                } else if (hasOriginal && !hasMaterialRef) {
-                    // 只有原图，没有面料参考 — 根据文字描述换色
-                    prompt = `You are an expert product material and color replacement specialist.
-
-INPUT:
-- Image 1: THE ORIGINAL PRODUCT IMAGE (preserve its exact composition, camera angle, lighting, background, shadows, and all scene elements. Only change the product's surface material/color).
-
-TASK:
-${userInput ? `The user requests: "${userInput}". Apply this color/material change to the main product in the image.` : 'Please describe the target color or material you want to apply.'}
-
-RULES:
-- Replace ONLY the product's surface color/material/texture as described
-- Reproduce realistic micro-texture for the target material: fabric weave/thread patterns, leather grain, wood grain, metal finish
-- Material must wrap naturally around the product's 3D form with correct texture deformation in folds and creases
-- DO NOT change shape, size, composition, background, camera angle, or non-product elements
-- Preserve structural elements (legs, frames, hardware) — only change surface covering
-- Lighting and shadow response must be recalculated: different materials interact with light differently
-- Do NOT over-smooth or flatten surfaces — maintain tangible, tactile material quality
-${qualitySuffix}`;
-                } else {
-                    prompt = `请上传要换色的产品原图，以及目标颜色/面料的参考图。`;
-                }
 
                 // Thinking message
                 let thinkingMsg = "🎨 正在换色换料处理中...";
                 if (hasOriginal && hasMaterialRef) {
-                    thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在参考面料/颜色替换产品材质...`;
+                    thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在分析面料纹理并替换材质...`;
                 } else if (hasOriginal) {
                     thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在根据描述替换产品颜色/材质...`;
                 }
@@ -1218,6 +1180,105 @@ ${qualitySuffix}`;
                    content: thinkingMsg
                 });
 
+                // --- Step 1: Pre-analyze reference material texture (Google SDK only) ---
+                let textureAnalysis = "";
+                if (hasOriginal && hasMaterialRef && apiProvider !== 'kie') {
+                    try {
+                        const refForAnalysis = await compressImageForApi(currentSceneRefs[0]);
+                        const analysisBase64 = refForAnalysis.split(',')[1];
+                        const analysisMime = refForAnalysis.split(';')[0].split(':')[1];
+                        
+                        const analysisResponse = await generateWithRetry(
+                            selectedTextModel,
+                            {
+                                contents: { parts: [
+                                    { inlineData: { mimeType: analysisMime, data: analysisBase64 } },
+                                    { text: `You are a textile/material analysis expert. Analyze this material swatch image and output a PRECISE technical description. Be extremely specific — this description will be used to reproduce the exact texture in an AI-generated image.
+
+Output ONLY the following fields (no other text):
+
+MATERIAL_TYPE: [e.g. chenille, velvet, linen, leather, cotton canvas, bouclé, corduroy, etc.]
+BASE_COLOR: [exact color description with undertones, e.g. "charcoal blue-grey with cool undertones"]
+COLOR_VARIATION: [how color varies across surface, e.g. "lighter on raised fibers, darker in valleys between yarns"]
+WEAVE_STRUCTURE: [specific weave/knit pattern, e.g. "thick chenille yarns creating a dense, plush pile with visible individual yarn segments"]
+FIBER_DETAIL: [visible fiber characteristics, e.g. "soft fuzzy fiber ends visible on surface, creating a halo effect"]
+SURFACE_TEXTURE: [tactile quality, e.g. "deep plush pile that compresses under pressure, showing lighter color when nap is pushed against grain"]
+LIGHT_BEHAVIOR: [how light interacts, e.g. "absorbs most light with soft matte finish, but shows subtle directional sheen when viewed at oblique angles — lighter when fibers lean toward viewer"]
+SCALE_REFERENCE: [approximate yarn/fiber/grain size, e.g. "individual chenille yarn segments approximately 3-4mm wide"]
+SURFACE_IRREGULARITIES: [natural imperfections, e.g. "slight variation in yarn thickness, occasional lighter fiber tufts, natural pile direction variation"]` }
+                                ] },
+                                config: { systemInstruction: "You are a textile expert. Be extremely precise and technical. Output only the requested fields." }
+                            }
+                        );
+                        textureAnalysis = analysisResponse?.text || "";
+                        console.log("Texture analysis:", textureAnalysis);
+                    } catch (e) {
+                        console.warn("Texture pre-analysis failed, proceeding without it:", e);
+                    }
+                }
+
+                if (hasOriginal && hasMaterialRef) {
+                    // 有原图 + 面料/颜色参考图 — OPTIMIZED PROMPT
+                    prompt = `MATERIAL TEXTURE REPLACEMENT — MAXIMUM FIDELITY
+
+IMAGES PROVIDED:
+- Image 1: ORIGINAL PRODUCT (keep everything identical except surface material)
+- Image 2: TARGET MATERIAL REFERENCE (full view)
+${currentSceneRefs.length > 0 ? '- Image 3: TARGET MATERIAL CLOSE-UP (zoomed center crop — study this for micro-texture detail)' : ''}
+
+${textureAnalysis ? `MATERIAL ANALYSIS (pre-analyzed from reference):
+${textureAnalysis}
+` : ''}
+${userInput ? `USER INSTRUCTION: "${userInput}"
+` : ''}
+TASK: Replace the product's fabric/surface in Image 1 with the EXACT material from the reference images.
+
+TEXTURE REPRODUCTION (CRITICAL — this is the #1 priority):
+1. COPY the reference material's texture EXACTLY — same weave structure, same yarn/fiber density, same surface grain pattern. Do NOT invent a simplified or smoothed version.
+2. The texture must show INDIVIDUAL FIBER/YARN DETAIL at the pixel level — every thread crossing, every fiber tuft, every surface irregularity from the reference must be reproduced.
+3. COLOR must have the same DEPTH and VARIATION as the reference — real fabrics are never one flat color. Reproduce the lighter/darker areas caused by fiber direction, pile compression, and light angle.
+4. SCALE the texture pattern correctly to the product's size — a sofa cushion shows more visible weave detail than a small swatch.
+
+LIGHT INTERACTION (CRITICAL — this makes or breaks realism):
+1. Recalculate how the scene's existing lighting hits the NEW material's surface properties.
+2. Matte/plush fabrics: soft light absorption with gradual shadow transitions, NO sharp specular highlights.
+3. Velvet/chenille: directional sheen where fibers lean — lighter when nap faces the light source, darker when facing away.
+4. Preserve the original scene's light direction, color temperature, and shadow patterns — only change how the NEW material responds to them.
+5. Shadows in fabric folds must show DARKER tone of the same material (compressed fibers), not black voids.
+
+3D SURFACE MAPPING:
+1. Texture must WRAP around the product's 3D form — following contours, seams, and edges.
+2. On curved/convex surfaces: texture slightly stretches and catches more light.
+3. In creases/folds: texture compresses and appears darker/denser.
+4. At edges/seams: fabric shows its thickness and construction.
+
+ABSOLUTE CONSTRAINTS:
+- DO NOT smooth, blur, or simplify ANY texture — if it looks too clean, it's wrong.
+- DO NOT change product shape, silhouette, proportions, camera angle, background, or non-fabric elements (legs, frames, hardware, buttons, zippers).
+- DO NOT change the scene composition, other objects, or background.
+- Preserve all seam lines and construction details.
+
+QUALITY: Photorealistic, 8K resolution. The replaced material must look identical to how the reference fabric would appear if physically upholstered onto this product and photographed with the same camera setup.`;
+                } else if (hasOriginal && !hasMaterialRef) {
+                    // 只有原图，没有面料参考 — 根据文字描述换色
+                    prompt = `MATERIAL/COLOR REPLACEMENT BY DESCRIPTION
+
+INPUT: Image 1 is the ORIGINAL PRODUCT. Preserve exact composition, camera angle, lighting, background, shadows.
+
+TASK: ${userInput ? `"${userInput}" — Apply this change to the product's surface material/color.` : 'Please describe the target color or material.'}
+
+TEXTURE REQUIREMENTS:
+- The new material must show REALISTIC micro-texture: visible weave/grain/fiber structure appropriate to the material type.
+- Color must have natural DEPTH and VARIATION — never flat or uniform. Real materials show subtle lighter/darker areas from surface geometry and light angle.
+- Light interaction must match the material type: matte fabrics absorb softly, glossy surfaces show reflections, textured surfaces show shadow in crevices.
+- Texture wraps naturally around 3D form — stretched on curves, compressed in folds.
+- Do NOT smooth or flatten — maintain tangible, touchable surface quality.
+
+CONSTRAINTS: Do NOT change shape, composition, background, camera angle, or non-surface elements (legs, frames, hardware). Photorealistic, 8K.`;
+                } else {
+                    prompt = `请上传要换色的产品原图，以及目标颜色/面料的参考图。`;
+                }
+
                 let generatedImageUrl: string | null = null;
                 let textResponse: string = "";
 
@@ -1231,17 +1292,31 @@ ${qualitySuffix}`;
                     });
                 } else {
                     const parts: any[] = [];
+                    // Original product image(s) — JPEG compression OK
                     for (const img of currentImages) {
                       const compressed = await compressImageForApi(img);
                       const base64Data = compressed.split(',')[1];
                       const mimeType = compressed.split(';')[0].split(':')[1];
                       parts.push({ inlineData: { mimeType: mimeType, data: base64Data } });
                     }
+                    // Material reference image(s) — preserve PNG quality for texture detail
                     for (const ref of currentSceneRefs) {
-                      const compressed = await compressImageForApi(ref);
-                      const refBase64 = compressed.split(',')[1];
-                      const refMime = compressed.split(';')[0].split(':')[1];
+                      const preserved = await compressImagePreservePng(ref);
+                      const refBase64 = preserved.split(',')[1];
+                      const refMime = preserved.split(';')[0].split(':')[1];
                       parts.push({ inlineData: { mimeType: refMime, data: refBase64 } });
+                    }
+                    // Add center crop of first reference for micro-texture detail emphasis
+                    if (currentSceneRefs.length > 0) {
+                      try {
+                        const textureCrop = await extractTextureCrop(currentSceneRefs[0], 0.4);
+                        const cropCompressed = await compressImagePreservePng(textureCrop);
+                        const cropBase64 = cropCompressed.split(',')[1];
+                        const cropMime = cropCompressed.split(';')[0].split(':')[1];
+                        parts.push({ inlineData: { mimeType: cropMime, data: cropBase64 } });
+                      } catch (e) {
+                        console.warn("Texture crop extraction failed:", e);
+                      }
                     }
                     parts.push({ text: prompt });
 
