@@ -4,16 +4,17 @@ import {
   Loader2, Layout, Maximize2, X, Layers, Key, Download, Trash2,
   Palette, Pipette, Upload, History, Clock, ChevronLeft, ChevronRight,
   MonitorUp, MoveHorizontal, Scaling, Wand2, Plus, Cloud, RefreshCw, AlertTriangle,
-  ImagePlus, Brush, Eraser
+  ImagePlus, Brush, Eraser, ShoppingBag, FileText, Store, ChevronDown
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import MessageBubble from './components/MessageBubble';
 import InpaintingModal from './components/InpaintingModal';
 import { 
   INITIAL_MESSAGE, ASPECT_RATIOS, 
-  RESOLUTIONS, OUTPUT_FORMATS, DESIGN_COLORS 
+  RESOLUTIONS, OUTPUT_FORMATS, DESIGN_COLORS,
+  ECOMMERCE_PLATFORMS, MAIN_IMAGE_STYLES, DETAIL_PAGE_SECTIONS
 } from './constants';
-import { Message, Mode } from './types';
+import { Message, Mode, EcommercePlatform } from './types';
 import { 
   saveMessageToDB, getHistoryFromDB, clearHistoryDB,
   initGapiClient, initGisClient, requestAccessToken, 
@@ -51,6 +52,15 @@ export default function App() {
 
   // Expand State
   const [showExpandMenu, setShowExpandMenu] = useState(false);
+
+  // --- E-commerce State ---
+  const [ecommercePlatform, setEcommercePlatform] = useState<EcommercePlatform>('taobao');
+  const [selectedSizePresetIdx, setSelectedSizePresetIdx] = useState(0);
+  const [mainImageStyle, setMainImageStyle] = useState('white_bg');
+  const [selectedDetailSections, setSelectedDetailSections] = useState<string[]>(['hero', 'selling_points', 'scene_usage']);
+  const [productName, setProductName] = useState('');
+  const [productSellingPoints, setProductSellingPoints] = useState('');
+  const [showPlatformDropdown, setShowPlatformDropdown] = useState(false);
 
   // --- API Configuration ---
   const [userApiKey, setUserApiKey] = useState(() => localStorage.getItem('lyra_api_key') || '');
@@ -952,6 +962,12 @@ Do NOT smooth or flatten. Do NOT over-simplify. Photorealistic, 8K. Every fiber 
     let displayPrompt = inputText;
     if (mode === 'reskin' && pendingImages.length > 0 && sceneRefImages.length > 0) {
         displayPrompt = `[换色换料] ${inputText}`;
+    } else if (mode === 'mainImage') {
+        const platformName = ECOMMERCE_PLATFORMS[ecommercePlatform].name;
+        displayPrompt = `[电商主图 — ${platformName}] ${inputText}`;
+    } else if (mode === 'detailPage') {
+        const platformName = ECOMMERCE_PLATFORMS[ecommercePlatform].name;
+        displayPrompt = `[详情页 — ${platformName}] ${inputText}`;
     } else if (sceneRefImages.length > 0 && pendingImages.length > 0) {
         displayPrompt = `[参考场景复刻] ${inputText}`;
     }
@@ -967,18 +983,27 @@ Do NOT smooth or flatten. Do NOT over-simplify. Photorealistic, 8K. Every fiber 
     const currentSceneRef = currentSceneRefs.length > 0 ? currentSceneRefs[0] : null;
     const colorContext = accentColor ? `\n\nDESIGN CONSTRAINT: Use the color ${accentColor} as a primary accent or dominant tone.` : '';
     
+    // Capture e-commerce state for async closures
+    const currentPlatform = ecommercePlatform;
+    const currentPlatformConfig = ECOMMERCE_PLATFORMS[ecommercePlatform];
+    const currentSizePresets = mode === 'mainImage' ? currentPlatformConfig.mainImageSizes : currentPlatformConfig.detailPageSizes;
+    const currentSizePreset = currentSizePresets[selectedSizePresetIdx] || currentSizePresets[0];
+    const currentMainImageStyle = mainImageStyle;
+    const currentDetailSections = [...selectedDetailSections];
+    const currentProductName = productName;
+    const currentSellingPoints = productSellingPoints;
+    
     // Reset Input State logic:
-    if (mode !== 'master' && mode !== 'reskin') {
+    if (mode !== 'master' && mode !== 'reskin' && mode !== 'mainImage' && mode !== 'detailPage') {
         setInputText('');
         setPendingImages([]);
         setSceneRefImages([]);
     }
 
     // --- 2. Define Generation Logic ---
-    // Master mode: all product images are combined as reference, generate `generateCount` images.
-    // Reskin mode: similar to master but for color/material replacement.
+    // Master/Reskin/MainImage/DetailPage: generate `generateCount` images.
     // Architect mode: one task per image for individual analysis.
-    const tasks: (string | null)[] = (mode === 'master' || mode === 'reskin')
+    const tasks: (string | null)[] = (mode === 'master' || mode === 'reskin' || mode === 'mainImage' || mode === 'detailPage')
       ? Array.from({ length: generateCount }, () => null)
       : (currentImages.length > 0 ? currentImages : [null]);
     
@@ -1355,6 +1380,210 @@ CONSTRAINTS: Do NOT change shape, composition, background, camera angle, or non-
                 }
                 if (!generatedImageUrl && !textResponse) {
                     addMessage({ id: baseId + 1, role: 'assistant', type: 'text', content: "⚠️ 换色换料生成失败,请重试。" });
+                }
+
+            } else if (mode === 'mainImage') {
+                // --- E-commerce Main Image Mode ---
+                const hasProduct = currentImages.length > 0;
+                const hasRef = currentSceneRefs.length > 0;
+                const userInput = currentInput || "";
+                const platformName = currentPlatformConfig.name;
+                const sizeLabel = `${currentSizePreset.width}x${currentSizePreset.height}`;
+                const styleObj = MAIN_IMAGE_STYLES.find(s => s.id === currentMainImageStyle);
+                const styleName = styleObj?.label || '白底图';
+                const styleDesc = styleObj?.description || '';
+
+                let prompt = `You are an expert e-commerce product photographer and visual designer specializing in ${platformName} main product images (主图).
+
+TARGET PLATFORM: ${platformName}
+IMAGE DIMENSIONS: ${sizeLabel} (${currentSizePreset.ratio}) — ${currentSizePreset.description}
+STYLE: ${styleName} — ${styleDesc}
+${currentProductName ? `PRODUCT NAME: ${currentProductName}` : ''}
+${currentSellingPoints ? `KEY SELLING POINTS: ${currentSellingPoints}` : ''}
+${userInput ? `USER INSTRUCTIONS: "${userInput}"` : ''}
+
+${hasProduct ? `INPUT IMAGES:
+- Product image(s): ${currentImages.length} reference photo(s) showing the product. Preserve product appearance with 100% fidelity (shape, color, material, texture, branding).
+${hasRef ? `- Reference image(s): ${currentSceneRefs.length} style/competitor reference(s) — use for inspiration ONLY, do NOT copy their products.` : ''}` : ''}
+
+TASK: Generate a high-converting e-commerce main product image (主图) optimized for ${platformName}.
+
+MAIN IMAGE REQUIREMENTS:
+1. PRODUCT HERO: The product must be the absolute center of attention, occupying 60-80% of the frame.
+2. CLEAN COMPOSITION: ${currentMainImageStyle === 'white_bg' ? 'Pure white (#FFFFFF) background with professional studio lighting. Subtle shadow for depth.' : currentMainImageStyle === 'scene' ? 'Natural lifestyle scene that contextualizes the product. Scene complements but never competes with the product.' : currentMainImageStyle === 'lifestyle' ? 'Lifestyle context showing the product in use. Natural, aspirational setting.' : currentMainImageStyle === 'creative' ? 'Creative, eye-catching composition with bold colors or unique angles. Must still clearly showcase the product.' : currentMainImageStyle === 'comparison' ? 'Before/after or comparison layout highlighting product advantages.' : 'Focus on key selling points with clear visual hierarchy.'}
+3. LIGHTING: Professional studio-quality lighting — even illumination, accurate color rendering, subtle highlights showing material quality.
+4. MATERIAL FIDELITY: Product texture must be razor-sharp — fabric weave, leather grain, metal finish, wood grain all clearly visible.
+5. COLOR ACCURACY: Product colors must be true-to-life, suitable for customer purchase decisions.
+6. E-COMMERCE OPTIMIZATION: 
+   - Image must look compelling at thumbnail size (mobile browsing)
+   - High contrast between product and background for visual pop
+   - Leave appropriate space for any text overlays if needed
+   - Aspect ratio must be exactly ${currentSizePreset.ratio}
+
+PLATFORM-SPECIFIC RULES (${platformName}):
+${currentPlatformConfig.mainImageTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')}
+
+ABSOLUTE CONSTRAINTS:
+- Product appearance (color, shape, material, texture, branding, logo) must be IDENTICAL to input.
+- Do NOT add text, watermarks, price tags, or promotional overlays — generate clean image only.
+- Do NOT distort product proportions or perspective.
+- Photorealistic quality — indistinguishable from professional product photography.
+- 8K resolution, professional color grading.
+${colorContext}`;
+
+                let thinkingMsg = `🛒 [图 ${taskIndex + 1}/${generateCount}] 正在生成${platformName}电商主图 (${styleName})...`;
+                if (apiProvider === 'kie') thinkingMsg += ' (kie.ai 异步生成中...)';
+                addMessage({ id: baseId, role: 'assistant', type: 'text', content: thinkingMsg });
+
+                let generatedImageUrl: string | null = null;
+                let textResponse = "";
+
+                if (apiProvider === 'kie') {
+                    const inputImages = [...currentImages, ...currentSceneRefs];
+                    generatedImageUrl = await kieGenerateImage(prompt, inputImages, {
+                        aspectRatio: currentSizePreset.ratio,
+                        resolution: resolution,
+                        outputFormat: outputFormat
+                    });
+                } else {
+                    const parts: any[] = [];
+                    for (const img of currentImages) {
+                      const compressed = await compressImageForApi(img);
+                      parts.push({ inlineData: { mimeType: compressed.split(';')[0].split(':')[1], data: compressed.split(',')[1] } });
+                    }
+                    for (const ref of currentSceneRefs) {
+                      const compressed = await compressImageForApi(ref);
+                      parts.push({ inlineData: { mimeType: compressed.split(';')[0].split(':')[1], data: compressed.split(',')[1] } });
+                    }
+                    parts.push({ text: prompt });
+
+                    const response = await generateWithRetry(selectedImageModel, {
+                        contents: { parts },
+                        config: { imageConfig: { aspectRatio: currentSizePreset.ratio, imageSize: resolution } }
+                    });
+
+                    if (response?.candidates?.[0]?.content?.parts) {
+                        for (const part of response.candidates[0].content.parts) {
+                            if (part.inlineData) {
+                                generatedImageUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
+                            } else if (part.text) {
+                                textResponse += part.text;
+                            }
+                        }
+                    }
+                }
+
+                if (generatedImageUrl) {
+                    generatedImageUrl = await convertImageFormat(generatedImageUrl, outputFormat);
+                    addMessage({ id: baseId + 1, role: 'assistant', type: 'image', content: generatedImageUrl });
+                    if (textResponse && textResponse.trim()) addMessage({ id: baseId + 2, role: 'assistant', type: 'text', content: textResponse });
+                } else {
+                    addMessage({ id: baseId + 1, role: 'assistant', type: 'text', content: textResponse || "⚠️ 电商主图生成失败，请重试。" });
+                }
+
+            } else if (mode === 'detailPage') {
+                // --- E-commerce Detail Page Mode ---
+                const hasProduct = currentImages.length > 0;
+                const hasRef = currentSceneRefs.length > 0;
+                const userInput = currentInput || "";
+                const platformName = currentPlatformConfig.name;
+                const sizeLabel = `${currentSizePreset.width}x${currentSizePreset.height}`;
+                const selectedSectionObjs = DETAIL_PAGE_SECTIONS.filter(s => currentDetailSections.includes(s.id));
+                const sectionNames = selectedSectionObjs.map(s => `${s.icon} ${s.label}: ${s.description}`).join('\n');
+
+                let prompt = `You are an expert e-commerce detail page designer specializing in ${platformName} product detail pages (详情页).
+
+TARGET PLATFORM: ${platformName}
+IMAGE DIMENSIONS: ${sizeLabel} (${currentSizePreset.ratio}) — ${currentSizePreset.description}
+${currentProductName ? `PRODUCT NAME: ${currentProductName}` : ''}
+${currentSellingPoints ? `KEY SELLING POINTS: ${currentSellingPoints}` : ''}
+${userInput ? `USER INSTRUCTIONS: "${userInput}"` : ''}
+
+${hasProduct ? `INPUT IMAGES:
+- Product image(s): ${currentImages.length} reference photo(s). Preserve product with 100% fidelity.
+${hasRef ? `- Reference image(s): ${currentSceneRefs.length} style reference(s) for design inspiration.` : ''}` : ''}
+
+TASK: Generate ONE section of a high-converting product detail page image for ${platformName}.
+
+SECTION TO GENERATE:
+${sectionNames}
+
+DETAIL PAGE IMAGE REQUIREMENTS:
+1. VISUAL STORYTELLING: Each section image must tell a compelling visual story about the product.
+2. INFORMATION HIERARCHY: Clear visual flow — the most important information should be immediately apparent.
+3. PRODUCT SHOWCASE: The product must be beautifully presented with professional lighting and accurate material rendering.
+4. LIFESTYLE CONTEXT: Where appropriate, show the product in realistic use scenarios that resonate with the target audience.
+5. MATERIAL DETAIL: Close-up shots must show fabric texture, material quality, craftsmanship details at maximum clarity.
+6. CONSISTENT STYLE: Maintain a cohesive visual language — consistent color palette, typography style areas, spacing.
+7. MOBILE-FIRST: Design must look excellent on mobile screens (primary browsing device).
+
+LAYOUT GUIDELINES:
+- Clean, modern layout with clear sections
+- Use negative space effectively
+- Product images must be high-quality and detailed
+- Lifestyle/scene images must feel authentic and aspirational
+- Leave appropriate areas for text overlay (selling points, specs, etc.) but do NOT add actual text
+- Aspect ratio: ${currentSizePreset.ratio}
+
+PLATFORM-SPECIFIC RULES (${platformName}):
+${currentPlatformConfig.detailPageTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')}
+
+ABSOLUTE CONSTRAINTS:
+- Product appearance must be IDENTICAL to input images.
+- Do NOT add text, watermarks, or promotional copy — generate clean imagery only.
+- Do NOT distort product proportions.
+- Photorealistic quality — professional product photography standard.
+- 8K resolution detail, professional color grading.
+${colorContext}`;
+
+                let thinkingMsg = `📄 [图 ${taskIndex + 1}/${generateCount}] 正在生成${platformName}详情页图片...`;
+                if (apiProvider === 'kie') thinkingMsg += ' (kie.ai 异步生成中...)';
+                addMessage({ id: baseId, role: 'assistant', type: 'text', content: thinkingMsg });
+
+                let generatedImageUrl: string | null = null;
+                let textResponse = "";
+
+                if (apiProvider === 'kie') {
+                    const inputImages = [...currentImages, ...currentSceneRefs];
+                    generatedImageUrl = await kieGenerateImage(prompt, inputImages, {
+                        aspectRatio: currentSizePreset.ratio,
+                        resolution: resolution,
+                        outputFormat: outputFormat
+                    });
+                } else {
+                    const parts: any[] = [];
+                    for (const img of currentImages) {
+                      const compressed = await compressImageForApi(img);
+                      parts.push({ inlineData: { mimeType: compressed.split(';')[0].split(':')[1], data: compressed.split(',')[1] } });
+                    }
+                    for (const ref of currentSceneRefs) {
+                      const compressed = await compressImageForApi(ref);
+                      parts.push({ inlineData: { mimeType: compressed.split(';')[0].split(':')[1], data: compressed.split(',')[1] } });
+                    }
+                    parts.push({ text: prompt });
+
+                    const response = await generateWithRetry(selectedImageModel, {
+                        contents: { parts },
+                        config: { imageConfig: { aspectRatio: currentSizePreset.ratio, imageSize: resolution } }
+                    });
+
+                    if (response?.candidates?.[0]?.content?.parts) {
+                        for (const part of response.candidates[0].content.parts) {
+                            if (part.inlineData) {
+                                generatedImageUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
+                            } else if (part.text) {
+                                textResponse += part.text;
+                            }
+                        }
+                    }
+                }
+
+                if (generatedImageUrl) {
+                    generatedImageUrl = await convertImageFormat(generatedImageUrl, outputFormat);
+                    addMessage({ id: baseId + 1, role: 'assistant', type: 'image', content: generatedImageUrl });
+                    if (textResponse && textResponse.trim()) addMessage({ id: baseId + 2, role: 'assistant', type: 'text', content: textResponse });
+                } else {
+                    addMessage({ id: baseId + 1, role: 'assistant', type: 'text', content: textResponse || "⚠️ 详情页图片生成失败，请重试。" });
                 }
 
             } else {
@@ -1990,6 +2219,17 @@ ${qualitySuffix}`;
               </button>
             </div>
 
+            {/* E-commerce Section */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 px-2 hidden md:block">电商工具</div>
+              <button onClick={() => setMode('mainImage')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${mode === 'mainImage' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 shadow-sm ring-1 ring-emerald-200 dark:ring-emerald-700' : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-400'}`}>
+                <ShoppingBag size={20} /><div className="text-left hidden md:block"><div className="font-medium text-sm">电商主图</div><div className="text-xs opacity-70">Main Image</div></div>
+              </button>
+              <button onClick={() => setMode('detailPage')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${mode === 'detailPage' ? 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 shadow-sm ring-1 ring-rose-200 dark:ring-rose-700' : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-400'}`}>
+                <FileText size={20} /><div className="text-left hidden md:block"><div className="font-medium text-sm">详情页</div><div className="text-xs opacity-70">Detail Page</div></div>
+              </button>
+            </div>
+
             {/* Google Drive Sync Section */}
             <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800">
                 <div className="flex items-center justify-between px-2">
@@ -2403,9 +2643,9 @@ ${qualitySuffix}`;
 
           <div className="max-w-5xl mx-auto p-4 md:p-6 md:pb-6">
             <div className="flex flex-col xl:flex-row gap-4 mb-4 items-start xl:items-center justify-between">
-              <div className={`text-xs font-medium px-4 py-2 rounded-xl border shadow-sm transition-colors flex items-center gap-2 ${mode === 'master' ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:border-purple-800 dark:text-purple-300' : mode === 'reskin' ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300' : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-800 dark:text-indigo-300'}`}>
-                <span className={`w-2 h-2 rounded-full ${mode === 'master' ? 'bg-purple-500' : mode === 'reskin' ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`}></span>
-                {mode === 'master' ? '✨ 生图大师模式 (合成)' : mode === 'reskin' ? '🎨 换色换料模式 (替换面料/颜色)' : '📐 提示词架构师 (解析)'}
+              <div className={`text-xs font-medium px-4 py-2 rounded-xl border shadow-sm transition-colors flex items-center gap-2 ${mode === 'master' ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:border-purple-800 dark:text-purple-300' : mode === 'reskin' ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300' : mode === 'mainImage' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-300' : mode === 'detailPage' ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/20 dark:border-rose-800 dark:text-rose-300' : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-800 dark:text-indigo-300'}`}>
+                <span className={`w-2 h-2 rounded-full ${mode === 'master' ? 'bg-purple-500' : mode === 'reskin' ? 'bg-amber-500' : mode === 'mainImage' ? 'bg-emerald-500' : mode === 'detailPage' ? 'bg-rose-500' : 'bg-indigo-500'} animate-pulse`}></span>
+                {mode === 'master' ? '✨ 生图大师模式 (合成)' : mode === 'reskin' ? '🎨 换色换料模式 (替换面料/颜色)' : mode === 'mainImage' ? `🛒 电商主图 — ${ECOMMERCE_PLATFORMS[ecommercePlatform].icon} ${ECOMMERCE_PLATFORMS[ecommercePlatform].name}` : mode === 'detailPage' ? `📄 详情页 — ${ECOMMERCE_PLATFORMS[ecommercePlatform].icon} ${ECOMMERCE_PLATFORMS[ecommercePlatform].name}` : '📐 提示词架构师 (解析)'}
               </div>
 
               {/* Toolbar: For Master and Reskin Modes */}
@@ -2445,6 +2685,280 @@ ${qualitySuffix}`;
                   </div>
                 </div>
               )}
+
+              {/* Toolbar: E-commerce Modes (mainImage / detailPage) */}
+              {(mode === 'mainImage' || mode === 'detailPage') && (
+                <div className="flex flex-col gap-3 w-full animate-in fade-in duration-300">
+                  {/* Row 1: Platform selector + Size preset */}
+                  <div className="flex flex-wrap gap-3 items-center">
+                    {/* Platform Dropdown */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowPlatformDropdown(!showPlatformDropdown)}
+                        className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm text-xs font-medium hover:border-slate-300 transition-all"
+                      >
+                        <Store size={14} />
+                        <span>{ECOMMERCE_PLATFORMS[ecommercePlatform].icon} {ECOMMERCE_PLATFORMS[ecommercePlatform].name}</span>
+                        <ChevronDown size={12} />
+                      </button>
+                      {showPlatformDropdown && (
+                        <div className="absolute top-full left-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50 min-w-[180px] overflow-hidden">
+                          {(Object.keys(ECOMMERCE_PLATFORMS) as EcommercePlatform[]).map((p) => (
+                            <button
+                              key={p}
+                              onClick={() => { setEcommercePlatform(p); setSelectedSizePresetIdx(0); setShowPlatformDropdown(false); }}
+                              className={`w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-2 ${ecommercePlatform === p ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'text-slate-600 dark:text-slate-400'}`}
+                            >
+                              <span>{ECOMMERCE_PLATFORMS[p].icon}</span>
+                              <span>{ECOMMERCE_PLATFORMS[p].name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Size Presets */}
+                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="px-2 text-slate-400 flex items-center gap-1"><Scaling size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">尺寸</span></div>
+                      <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                        {(mode === 'mainImage' ? ECOMMERCE_PLATFORMS[ecommercePlatform].mainImageSizes : ECOMMERCE_PLATFORMS[ecommercePlatform].detailPageSizes).map((preset, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setSelectedSizePresetIdx(idx)}
+                            title={`${preset.width}x${preset.height} - ${preset.description}`}
+                            className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium ${selectedSizePresetIdx === idx ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Output Format */}
+                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="px-2 text-slate-400 flex items-center gap-1"><ImageIcon size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">格式</span></div>
+                      <div className="flex gap-1">
+                        {OUTPUT_FORMATS.map((fmt) => (
+                          <button key={fmt} onClick={() => setOutputFormat(fmt as 'jpg' | 'png')} className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium uppercase ${outputFormat === fmt ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}>{fmt}</button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Generate Count */}
+                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="px-2 text-slate-400 flex items-center gap-1"><Layers size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">数量</span></div>
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4].map((count) => (
+                          <button key={count} onClick={() => setGenerateCount(count)} className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium ${generateCount === count ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}>{count}张</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Style selector (mainImage) or Section selector (detailPage) */}
+                  {mode === 'mainImage' ? (
+                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="px-2 text-slate-400 flex items-center gap-1"><Wand2 size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">风格</span></div>
+                      <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                        {MAIN_IMAGE_STYLES.map((style) => (
+                          <button
+                            key={style.id}
+                            onClick={() => setMainImageStyle(style.id)}
+                            title={style.description}
+                            className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium ${mainImageStyle === style.id ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+                          >
+                            {style.icon} {style.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="px-2 text-slate-400 flex items-center gap-1 shrink-0"><FileText size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">板块</span></div>
+                      <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                        {DETAIL_PAGE_SECTIONS.map((section) => (
+                          <button
+                            key={section.id}
+                            onClick={() => {
+                              setSelectedDetailSections(prev =>
+                                prev.includes(section.id)
+                                  ? prev.filter(s => s !== section.id)
+                                  : [...prev, section.id]
+                              );
+                            }}
+                            title={section.description}
+                            className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium ${selectedDetailSections.includes(section.id) ? 'bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 shadow-sm ring-1 ring-rose-200 dark:ring-rose-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+                          >
+                            {section.icon} {section.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Row 3: Product Info Inputs */}
+                  <div className="flex gap-3 items-center">
+                    <input
+                      type="text"
+                      value={productName}
+                      onChange={(e) => setProductName(e.target.value)}
+                      placeholder="产品名称（如：北欧实木餐桌）"
+                      className="flex-1 text-xs px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    />
+                    <input
+                      type="text"
+                      value={productSellingPoints}
+                      onChange={(e) => setProductSellingPoints(e.target.value)}
+                      placeholder="核心卖点（如：环保材质/简约设计/多功能）"
+                      className="flex-1 text-xs px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    />
+                  </div>
+
+                  {/* Tips */}
+                  <div className="flex gap-2 overflow-x-auto scrollbar-hide">
+                    {(mode === 'mainImage' ? ECOMMERCE_PLATFORMS[ecommercePlatform].mainImageTips : ECOMMERCE_PLATFORMS[ecommercePlatform].detailPageTips).slice(0, 3).map((tip, idx) => (
+                      <div key={idx} className="text-[10px] text-slate-400 bg-slate-50 dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-100 dark:border-slate-800 whitespace-nowrap">💡 {tip}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Toolbar: E-commerce Modes (mainImage / detailPage) */}
+              {(mode === 'mainImage' || mode === 'detailPage') && (
+                <div className="flex flex-col gap-3 w-full animate-in fade-in duration-300">
+                  {/* Row 1: Platform selector + Size preset */}
+                  <div className="flex flex-wrap gap-3 items-center">
+                    {/* Platform Dropdown */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowPlatformDropdown(!showPlatformDropdown)}
+                        className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm text-xs font-medium hover:border-slate-300 transition-all"
+                      >
+                        <Store size={14} />
+                        <span>{ECOMMERCE_PLATFORMS[ecommercePlatform].icon} {ECOMMERCE_PLATFORMS[ecommercePlatform].name}</span>
+                        <ChevronDown size={12} />
+                      </button>
+                      {showPlatformDropdown && (
+                        <div className="absolute top-full left-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50 min-w-[180px] overflow-hidden">
+                          {(Object.keys(ECOMMERCE_PLATFORMS) as EcommercePlatform[]).map((p) => (
+                            <button
+                              key={p}
+                              onClick={() => { setEcommercePlatform(p); setSelectedSizePresetIdx(0); setShowPlatformDropdown(false); }}
+                              className={`w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-2 ${ecommercePlatform === p ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'text-slate-600 dark:text-slate-400'}`}
+                            >
+                              <span>{ECOMMERCE_PLATFORMS[p].icon}</span>
+                              <span>{ECOMMERCE_PLATFORMS[p].name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Size Presets */}
+                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="px-2 text-slate-400 flex items-center gap-1"><Scaling size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">尺寸</span></div>
+                      <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                        {(mode === 'mainImage' ? ECOMMERCE_PLATFORMS[ecommercePlatform].mainImageSizes : ECOMMERCE_PLATFORMS[ecommercePlatform].detailPageSizes).map((preset, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setSelectedSizePresetIdx(idx)}
+                            title={`${preset.width}x${preset.height} - ${preset.description}`}
+                            className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium ${selectedSizePresetIdx === idx ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Output Format */}
+                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="px-2 text-slate-400 flex items-center gap-1"><ImageIcon size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">格式</span></div>
+                      <div className="flex gap-1">
+                        {OUTPUT_FORMATS.map((fmt) => (
+                          <button key={fmt} onClick={() => setOutputFormat(fmt as 'jpg' | 'png')} className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium uppercase ${outputFormat === fmt ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}>{fmt}</button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Generate Count */}
+                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="px-2 text-slate-400 flex items-center gap-1"><Layers size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">数量</span></div>
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4].map((count) => (
+                          <button key={count} onClick={() => setGenerateCount(count)} className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium ${generateCount === count ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}>{count}张</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Style selector (mainImage) or Section selector (detailPage) */}
+                  {mode === 'mainImage' ? (
+                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="px-2 text-slate-400 flex items-center gap-1"><Wand2 size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">风格</span></div>
+                      <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                        {MAIN_IMAGE_STYLES.map((style) => (
+                          <button
+                            key={style.id}
+                            onClick={() => setMainImageStyle(style.id)}
+                            title={style.description}
+                            className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium ${mainImageStyle === style.id ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+                          >
+                            {style.icon} {style.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="px-2 text-slate-400 flex items-center gap-1 shrink-0"><FileText size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">板块</span></div>
+                      <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                        {DETAIL_PAGE_SECTIONS.map((section) => (
+                          <button
+                            key={section.id}
+                            onClick={() => {
+                              setSelectedDetailSections(prev =>
+                                prev.includes(section.id)
+                                  ? prev.filter(s => s !== section.id)
+                                  : [...prev, section.id]
+                              );
+                            }}
+                            title={section.description}
+                            className={`text-xs px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap font-medium ${selectedDetailSections.includes(section.id) ? 'bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 shadow-sm ring-1 ring-rose-200 dark:ring-rose-700' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+                          >
+                            {section.icon} {section.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Row 3: Product Info Inputs */}
+                  <div className="flex gap-3 items-center">
+                    <input
+                      type="text"
+                      value={productName}
+                      onChange={(e) => setProductName(e.target.value)}
+                      placeholder="产品名称（如：北欧实木餐桌）"
+                      className="flex-1 text-xs px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    />
+                    <input
+                      type="text"
+                      value={productSellingPoints}
+                      onChange={(e) => setProductSellingPoints(e.target.value)}
+                      placeholder="核心卖点（如：环保材质/简约设计/多功能）"
+                      className="flex-1 text-xs px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    />
+                  </div>
+
+                  {/* Tips */}
+                  <div className="flex gap-2 overflow-x-auto scrollbar-hide">
+                    {(mode === 'mainImage' ? ECOMMERCE_PLATFORMS[ecommercePlatform].mainImageTips : ECOMMERCE_PLATFORMS[ecommercePlatform].detailPageTips).slice(0, 3).map((tip, idx) => (
+                      <div key={idx} className="text-[10px] text-slate-400 bg-slate-50 dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-100 dark:border-slate-800 whitespace-nowrap">💡 {tip}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div 
@@ -2462,7 +2976,7 @@ ${qualitySuffix}`;
                   <button 
                     onClick={() => fileInputRef.current?.click()} 
                     className={`p-3 rounded-xl transition-all shadow-sm border border-transparent relative ${pendingImages.length > 0 ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'text-slate-500 hover:text-indigo-600 hover:bg-white dark:hover:bg-slate-800 hover:border-slate-200'}`} 
-                    title={mode === 'reskin' ? "① 上传原图（要换色的产品图）" : "上传产品图 (支持多选)"}
+                    title={mode === 'reskin' ? "① 上传原图（要换色的产品图）" : (mode === 'mainImage' || mode === 'detailPage') ? "上传产品图（白底图效果最佳）" : "上传产品图 (支持多选)"}
                   >
                     {pendingImages.length > 0 ? <Layers size={20} /> : <ImageIcon size={20} />}
                     {pendingImages.length > 1 && (
@@ -2472,15 +2986,15 @@ ${qualitySuffix}`;
                     )}
                   </button>
 
-                  {/* Scene/Material Reference Upload Button - Master and Reskin Modes */}
-                  {(mode === 'master' || mode === 'reskin') && (
+                  {/* Scene/Material Reference Upload Button - Master, Reskin and E-commerce Modes */}
+                  {(mode === 'master' || mode === 'reskin' || mode === 'mainImage' || mode === 'detailPage') && (
                        <button 
                         onClick={() => sceneRefInputRef.current?.click()} 
                         onDrop={handleDropOnScene}
                         onDragOver={(e) => { preventDragDefault(e); e.currentTarget.classList.add('ring-2', 'ring-purple-400', 'bg-purple-50'); }}
                         onDragLeave={(e) => { e.currentTarget.classList.remove('ring-2', 'ring-purple-400', 'bg-purple-50'); }}
                         className={`p-3 rounded-xl transition-all shadow-sm border border-transparent relative ${sceneRefImages.length > 0 ? (mode === 'reskin' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-purple-50 text-purple-600 border-purple-200') : 'text-slate-500 hover:text-purple-600 hover:bg-white dark:hover:bg-slate-800 hover:border-slate-200'}`} 
-                        title={mode === 'reskin' ? "② 上传面料参考图（要替换成的目标颜色/面料）" : "上传场景/风格参考图 (支持多张，可拖拽)"}
+                        title={mode === 'reskin' ? "② 上传面料参考图（要替换成的目标颜色/面料）" : (mode === 'mainImage' || mode === 'detailPage') ? "上传参考图/竞品图（可选）" : "上传场景/风格参考图 (支持多张，可拖拽)"}
                        >
                         {mode === 'reskin' ? <Pipette size={20} /> : <ImagePlus size={20} />}
                         {sceneRefImages.length > 0 && (
@@ -2496,7 +3010,7 @@ ${qualitySuffix}`;
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
                 onPaste={handlePaste}
-                placeholder={mode === 'reskin' ? (pendingImages.length > 0 ? (sceneRefImages.length > 0 ? `已就绪：原图 + 面料参考。可输入额外说明（如指定替换区域）...` : `已上传原图。请再上传目标颜色/面料参考图...`) : "请先上传要换色的产品原图...") : mode === 'master' ? (pendingImages.length > 0 ? (sceneRefImages.length > 0 ? `已就绪：产品 + ${sceneRefImages.length}张场景参考。输入额外调整指令...` : `已就绪 ${pendingImages.length} 张产品图。输入场景描述...`) : "请先上传白底产品图，可选择上传场景参考图...") : "上传图片分析提示词..."}
+                placeholder={mode === 'reskin' ? (pendingImages.length > 0 ? (sceneRefImages.length > 0 ? `已就绪：原图 + 面料参考。可输入额外说明（如指定替换区域）...` : `已上传原图。请再上传目标颜色/面料参考图...`) : "请先上传要换色的产品原图...") : mode === 'master' ? (pendingImages.length > 0 ? (sceneRefImages.length > 0 ? `已就绪：产品 + ${sceneRefImages.length}张场景参考。输入额外调整指令...` : `已就绪 ${pendingImages.length} 张产品图。输入场景描述...`) : "请先上传白底产品图，可选择上传场景参考图...") : (mode === 'mainImage' || mode === 'detailPage') ? (pendingImages.length > 0 ? `已上传产品图。可输入额外描述或直接生成${mode === 'mainImage' ? '主图' : '详情页'}...` : `请上传产品图（白底图最佳），输入产品描述生成${mode === 'mainImage' ? '电商主图' : '详情页'}...`) : "上传图片分析提示词..."}
                 className="flex-1 max-h-[50vh] min-h-[160px] py-3 px-2 bg-transparent border-none focus:ring-0 resize-y text-slate-800 dark:text-slate-100 placeholder:text-slate-400 font-medium leading-relaxed custom-scrollbar"
                 rows={6}
               />
