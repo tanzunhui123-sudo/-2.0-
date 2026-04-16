@@ -48,9 +48,9 @@ export const ECOMMERCE_PLATFORMS: Record<EcommercePlatform, PlatformConfig> = {
       { label: '9:16主图', width: 720, height: 1280, ratio: '9:16', description: '短视频/竖屏封面' },
     ],
     detailPageSizes: [
-      { label: '详情页标准', width: 790, height: 1200, ratio: '790宽', description: '标准详情页宽度790px' },
-      { label: '详情页窄版', width: 750, height: 1200, ratio: '750宽', description: '手机端详情页750px' },
-      { label: '详情页长图', width: 790, height: 2000, ratio: '790宽长', description: '详情页超长展示' },
+      { label: '详情页标准', width: 790, height: 1200, ratio: '2:3', description: '标准详情页宽度790px' },
+      { label: '详情页窄版', width: 750, height: 1200, ratio: '2:3', description: '手机端详情页750px' },
+      { label: '详情页长图', width: 790, height: 2000, ratio: '9:16', description: '详情页超长展示' },
     ],
     mainImageTips: [
       '主图尺寸建议800x800，至少700x700',
@@ -76,8 +76,8 @@ export const ECOMMERCE_PLATFORMS: Record<EcommercePlatform, PlatformConfig> = {
       { label: 'SKU图', width: 800, height: 800, ratio: '1:1', description: 'SKU属性图' },
     ],
     detailPageSizes: [
-      { label: '详情页标准', width: 990, height: 1400, ratio: '990宽', description: 'PC端详情宽度990px' },
-      { label: '详情页移动', width: 750, height: 1200, ratio: '750宽', description: '移动端详情750px' },
+      { label: '详情页标准', width: 990, height: 1400, ratio: '3:4', description: 'PC端详情宽度990px' },
+      { label: '详情页移动', width: 750, height: 1200, ratio: '2:3', description: '移动端详情750px' },
     ],
     mainImageTips: [
       '主图尺寸800x800以上，正方形',
@@ -101,8 +101,8 @@ export const ECOMMERCE_PLATFORMS: Record<EcommercePlatform, PlatformConfig> = {
       { label: '轮播长图', width: 750, height: 1000, ratio: '3:4', description: '轮播长图展示' },
     ],
     detailPageSizes: [
-      { label: '详情页标准', width: 750, height: 1200, ratio: '750宽', description: '拼多多详情页标准' },
-      { label: '详情页长图', width: 750, height: 1500, ratio: '750宽长', description: '长屏详情展示' },
+      { label: '详情页标准', width: 750, height: 1200, ratio: '2:3', description: '拼多多详情页标准' },
+      { label: '详情页长图', width: 750, height: 1500, ratio: '9:16', description: '长屏详情展示' },
     ],
     mainImageTips: [
       '主图750x750以上',
@@ -126,8 +126,8 @@ export const ECOMMERCE_PLATFORMS: Record<EcommercePlatform, PlatformConfig> = {
       { label: '短视频封面', width: 1080, height: 1920, ratio: '9:16', description: '短视频/直播封面' },
     ],
     detailPageSizes: [
-      { label: '详情页标准', width: 750, height: 1200, ratio: '750宽', description: '抖音详情页标准' },
-      { label: '详情页竖版', width: 750, height: 1600, ratio: '750宽长', description: '竖版详情展示' },
+      { label: '详情页标准', width: 750, height: 1200, ratio: '2:3', description: '抖音详情页标准' },
+      { label: '详情页竖版', width: 750, height: 1600, ratio: '9:16', description: '竖版详情展示' },
     ],
     mainImageTips: [
       '主图800x800，视觉冲击力强',
@@ -151,7 +151,7 @@ export const ECOMMERCE_PLATFORMS: Record<EcommercePlatform, PlatformConfig> = {
     ],
     detailPageSizes: [
       { label: '笔记详情图', width: 1080, height: 1440, ratio: '3:4', description: '笔记配图标准' },
-      { label: '商品详情', width: 750, height: 1200, ratio: '750宽', description: '商品详情页' },
+      { label: '商品详情', width: 750, height: 1200, ratio: '2:3', description: '商品详情页' },
     ],
     mainImageTips: [
       '推荐竖版3:4比例，占屏更大',
@@ -171,11 +171,11 @@ export const ECOMMERCE_PLATFORMS: Record<EcommercePlatform, PlatformConfig> = {
     mainImageSizes: [
       { label: 'Main Image', width: 2000, height: 2000, ratio: '1:1', description: 'Amazon主图2000x2000' },
       { label: 'Standard', width: 1500, height: 1500, ratio: '1:1', description: 'Amazon标准图' },
-      { label: 'A+竖版', width: 970, height: 600, ratio: '970宽', description: 'A+ Content Banner' },
+      { label: 'A+竖版', width: 970, height: 600, ratio: '3:2', description: 'A+ Content Banner' },
     ],
     detailPageSizes: [
-      { label: 'A+ Standard', width: 970, height: 600, ratio: '970宽', description: 'A+ Content标准模块' },
-      { label: 'A+ Full Width', width: 1464, height: 600, ratio: '1464宽', description: 'A+ Content全宽' },
+      { label: 'A+ Standard', width: 970, height: 600, ratio: '3:2', description: 'A+ Content标准模块' },
+      { label: 'A+ Full Width', width: 1464, height: 600, ratio: '21:9', description: 'A+ Content全宽' },
       { label: 'A+ Square', width: 300, height: 300, ratio: '1:1', description: 'A+ Content方图模块' },
     ],
     mainImageTips: [
@@ -198,10 +198,113 @@ export const ECOMMERCE_PLATFORMS: Record<EcommercePlatform, PlatformConfig> = {
       { label: '自定义尺寸', width: 800, height: 800, ratio: '1:1', description: '自定义主图尺寸' },
     ],
     detailPageSizes: [
-      { label: '自定义尺寸', width: 750, height: 1200, ratio: '750宽', description: '自定义详情页尺寸' },
+      { label: '自定义尺寸', width: 750, height: 1200, ratio: '2:3', description: '自定义详情页尺寸' },
     ],
     mainImageTips: ['按照目标平台要求设置尺寸'],
     detailPageTips: ['按照目标平台要求设置尺寸'],
+  },
+};
+
+// ========== Platform-specific Floor Ratio Presets ==========
+export interface FloorRatioPreset {
+  value: string;       // ratio value like "1:1", "970:600"
+  label: string;       // display name
+  pixels: string;      // pixel dimensions like "800×800"
+  recommended?: boolean; // mark as recommended
+}
+
+export const PLATFORM_FLOOR_RATIOS: Record<EcommercePlatform, { mainImage: FloorRatioPreset[]; detailPage: FloorRatioPreset[] }> = {
+  taobao: {
+    mainImage: [
+      { value: '1:1', label: '标准主图', pixels: '800×800', recommended: true },
+      { value: '1:1', label: '高清主图', pixels: '1500×1500' },
+      { value: '3:4', label: '搜索竖图', pixels: '900×1200' },
+      { value: '9:16', label: '短视频封面', pixels: '720×1280' },
+    ],
+    detailPage: [
+      { value: '790:1200', label: '标准详情', pixels: '790×1200', recommended: true },
+      { value: '750:1200', label: '手机端详情', pixels: '750×1200' },
+      { value: '790:2000', label: '超长详情', pixels: '790×2000' },
+    ],
+  },
+  jd: {
+    mainImage: [
+      { value: '1:1', label: '标准主图', pixels: '800×800', recommended: true },
+      { value: '1:1', label: '高清大图', pixels: '1500×1500' },
+      { value: '1:1', label: 'SKU属性图', pixels: '800×800' },
+    ],
+    detailPage: [
+      { value: '990:1400', label: 'PC端详情', pixels: '990×1400', recommended: true },
+      { value: '750:1200', label: '移动端详情', pixels: '750×1200' },
+      { value: '990:600', label: '横幅模块', pixels: '990×600' },
+    ],
+  },
+  pdd: {
+    mainImage: [
+      { value: '1:1', label: '标准主图', pixels: '750×750', recommended: true },
+      { value: '1:1', label: '高清主图', pixels: '1200×1200' },
+      { value: '3:4', label: '轮播长图', pixels: '750×1000' },
+    ],
+    detailPage: [
+      { value: '750:1200', label: '标准详情', pixels: '750×1200', recommended: true },
+      { value: '750:1500', label: '长屏详情', pixels: '750×1500' },
+      { value: '750:1000', label: '短屏详情', pixels: '750×1000' },
+    ],
+  },
+  douyin: {
+    mainImage: [
+      { value: '1:1', label: '商品主图', pixels: '800×800', recommended: true },
+      { value: '3:4', label: '商品竖版', pixels: '750×1000' },
+      { value: '9:16', label: '短视频封面', pixels: '1080×1920' },
+    ],
+    detailPage: [
+      { value: '750:1200', label: '标准详情', pixels: '750×1200', recommended: true },
+      { value: '750:1600', label: '竖版详情', pixels: '750×1600' },
+      { value: '750:1000', label: '短屏详情', pixels: '750×1000' },
+    ],
+  },
+  xiaohongshu: {
+    mainImage: [
+      { value: '3:4', label: '竖版推荐', pixels: '1080×1440', recommended: true },
+      { value: '1:1', label: '正方形', pixels: '1080×1080' },
+      { value: '2:3', label: '长图', pixels: '1080×1620' },
+    ],
+    detailPage: [
+      { value: '3:4', label: '笔记配图', pixels: '1080×1440', recommended: true },
+      { value: '750:1200', label: '商品详情', pixels: '750×1200' },
+      { value: '1:1', label: '方图笔记', pixels: '1080×1080' },
+    ],
+  },
+  amazon: {
+    mainImage: [
+      { value: '1:1', label: 'Main Image', pixels: '2000×2000', recommended: true },
+      { value: '1:1', label: 'Standard', pixels: '1500×1500' },
+      { value: '1:1', label: 'Minimum', pixels: '1000×1000' },
+    ],
+    detailPage: [
+      { value: '970:600', label: '普通A+ 标准', pixels: '970×600', recommended: true },
+      { value: '1464:600', label: '高级A+ 全宽', pixels: '1464×600' },
+      { value: '300:300', label: 'A+ 方图模块', pixels: '300×300' },
+      { value: '220:220', label: 'A+ 小图模块', pixels: '220×220' },
+      { value: '362:453', label: 'A+ 对比图', pixels: '362×453' },
+    ],
+  },
+  custom: {
+    mainImage: [
+      { value: '1:1', label: '正方形', pixels: '800×800' },
+      { value: '3:4', label: '竖版', pixels: '900×1200' },
+      { value: '4:3', label: '横版', pixels: '1200×900' },
+      { value: '9:16', label: '竖屏', pixels: '1080×1920' },
+      { value: '16:9', label: '横屏', pixels: '1920×1080' },
+      { value: '2:3', label: '2:3竖版', pixels: '800×1200' },
+    ],
+    detailPage: [
+      { value: '750:1200', label: '标准详情', pixels: '750×1200' },
+      { value: '2:3', label: '2:3竖版', pixels: '800×1200' },
+      { value: '1:1', label: '正方形', pixels: '800×800' },
+      { value: '9:16', label: '长图', pixels: '750×1333' },
+      { value: '16:9', label: '横版', pixels: '1200×675' },
+    ],
   },
 };
 
