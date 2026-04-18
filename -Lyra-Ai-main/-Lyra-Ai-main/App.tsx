@@ -299,30 +299,19 @@ export default function App() {
       const userInstr = userInstrMatch?.[1]?.trim() || '';
       
       // Detect mode from prompt content and build a concise prompt
-      if (kiePrompt.includes('MATERIAL') && kiePrompt.includes('REPLACEMENT')) {
-        // Reskin mode — detailed prompt to preserve texture realism
-        kiePrompt = `Material and color replacement task.
+      if (kiePrompt.includes('RESKIN') || (kiePrompt.includes('MATERIAL') && kiePrompt.includes('REPLACEMENT'))) {
+        // Reskin mode — clear, focused prompt
+        kiePrompt = `RESKIN TASK: The FIRST input image is the ORIGINAL PRODUCT. The SECOND input image is the TARGET MATERIAL/FABRIC reference swatch.
 
-Image 1 is the ORIGINAL product photo. Image 2 is the TARGET material/texture reference.
+Generate a NEW photo of the original product with its surface material replaced by the target material. Output a COMPLETE PRODUCT PHOTO, NOT a fabric swatch.
 
-TASK: Replace ONLY the fabric/material surface of the product in Image 1 with the material shown in Image 2.
-
-CRITICAL TEXTURE REQUIREMENTS:
-- Reproduce the EXACT weave pattern, thread density, and surface grain from Image 2
-- The new material must show realistic micro-texture details: individual fibers, weave crossings, fabric pilling, or leather grain pores
-- Fabric wrinkles, creases, and folds must deform the texture pattern naturally — stretched on convex surfaces, compressed in folds
-- Maintain correct texture scale — the pattern size must be proportional to the real product dimensions
-- Light interaction must match material physics: matte fabrics absorb light with soft gradients, velvet has directional sheen, leather shows specular highlights
-- Seam lines, stitching, and piping must remain visible with the new material draping over them
-
-STRICT PRESERVATION RULES:
-- Keep the EXACT same product shape, silhouette, proportions, camera angle, and perspective as Image 1
-- Keep the IDENTICAL background, floor, surrounding objects, and all non-product elements
-- Keep all structural elements: legs, frames, armrests shape, cushion form
-- Preserve the original photo's lighting direction, shadow positions, and ambient occlusion
-- The result must look like an actual photograph, not a 3D render or digital painting
-
-OUTPUT: A photorealistic product photo indistinguishable from a real camera shot. The texture must have the same tangible, tactile quality as a close-up fabric swatch.${userInstr ? `\n\nUser instruction: ${userInstr}` : ''}`;
+Requirements:
+- Product shape, silhouette, angle, background, and non-surface elements stay IDENTICAL to the original
+- Copy the exact color, weave pattern, and texture from the reference material onto the product
+- Texture wraps naturally around the 3D form (stretch on curves, compress in folds)
+- Realistic lighting interaction matching the new material's surface properties
+- Preserve seams, stitching, and construction details
+- Photorealistic output indistinguishable from a real photograph${userInstr ? `\n\nUser instruction: ${userInstr}` : ''}`;
       } else if (kiePrompt.includes('SCENE') && kiePrompt.includes('PRODUCT')) {
         // Master mode with scene reference — enhanced for material fidelity
         kiePrompt = `Product scene placement task.
@@ -1246,17 +1235,15 @@ You MUST output TWO physically separate sections: English prompt for AI generati
                 });
 
             } else if (mode === 'reskin') {
-                // --- Reskin Mode (换色换料) --- OPTIMIZED for texture fidelity
+                // --- Reskin Mode (换色换料) --- FIXED: interleave text labels with images
                 const hasOriginal = currentImages.length > 0;
                 const hasMaterialRef = currentSceneRefs.length > 0;
                 const userInput = currentInput || "";
 
-                let prompt = "";
-
                 // Thinking message
                 let thinkingMsg = "🎨 正在换色换料处理中...";
                 if (hasOriginal && hasMaterialRef) {
-                    thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在分析面料纹理并替换材质...`;
+                    thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在将产品材质替换为目标面料...`;
                 } else if (hasOriginal) {
                     thinkingMsg = `🎨 [图 ${taskIndex + 1}/${generateCount}] 正在根据描述替换产品颜色/材质...`;
                 }
@@ -1272,6 +1259,7 @@ You MUST output TWO physically separate sections: English prompt for AI generati
                 });
 
                 // --- Step 1: Pre-analyze reference material texture (Google SDK only) ---
+                // Use a concise analysis to avoid overwhelming the image model
                 let textureAnalysis = "";
                 if (hasOriginal && hasMaterialRef && apiProvider !== 'kie') {
                     try {
@@ -1284,21 +1272,9 @@ You MUST output TWO physically separate sections: English prompt for AI generati
                             {
                                 contents: { parts: [
                                     { inlineData: { mimeType: analysisMime, data: analysisBase64 } },
-                                    { text: `You are a textile/material analysis expert. Analyze this material swatch image and output a PRECISE technical description. Be extremely specific — this description will be used to reproduce the exact texture in an AI-generated image.
-
-Output ONLY the following fields (no other text):
-
-MATERIAL_TYPE: [e.g. chenille, velvet, linen, leather, cotton canvas, bouclé, corduroy, etc.]
-BASE_COLOR: [exact color description with undertones, e.g. "charcoal blue-grey with cool undertones"]
-COLOR_VARIATION: [how color varies across surface, e.g. "lighter on raised fibers, darker in valleys between yarns"]
-WEAVE_STRUCTURE: [specific weave/knit pattern, e.g. "thick chenille yarns creating a dense, plush pile with visible individual yarn segments"]
-FIBER_DETAIL: [visible fiber characteristics, e.g. "soft fuzzy fiber ends visible on surface, creating a halo effect"]
-SURFACE_TEXTURE: [tactile quality, e.g. "deep plush pile that compresses under pressure, showing lighter color when nap is pushed against grain"]
-LIGHT_BEHAVIOR: [how light interacts, e.g. "absorbs most light with soft matte finish, but shows subtle directional sheen when viewed at oblique angles — lighter when fibers lean toward viewer"]
-SCALE_REFERENCE: [approximate yarn/fiber/grain size, e.g. "individual chenille yarn segments approximately 3-4mm wide"]
-SURFACE_IRREGULARITIES: [natural imperfections, e.g. "slight variation in yarn thickness, occasional lighter fiber tufts, natural pile direction variation"]` }
+                                    { text: `Analyze this material/fabric swatch. Output a concise description (max 100 words) covering: material type, color, texture pattern, surface quality, and how light interacts with it. Be specific and technical. Output ONLY the description, no labels or formatting.` }
                                 ] },
-                                config: { systemInstruction: "You are a textile expert. Be extremely precise and technical. Output only the requested fields." }
+                                config: { systemInstruction: "You are a textile expert. Be concise and precise." }
                             }
                         );
                         textureAnalysis = analysisResponse?.text || "";
@@ -1308,108 +1284,94 @@ SURFACE_IRREGULARITIES: [natural imperfections, e.g. "slight variation in yarn t
                     }
                 }
 
-                if (hasOriginal && hasMaterialRef) {
-                    // 有原图 + 面料/颜色参考图 — OPTIMIZED PROMPT
-                    prompt = `MATERIAL TEXTURE REPLACEMENT — MAXIMUM FIDELITY
-
-IMAGES PROVIDED:
-- Image 1: ORIGINAL PRODUCT (keep everything identical except surface material)
-- Image 2: TARGET MATERIAL REFERENCE (full view)
-${currentSceneRefs.length > 0 ? '- Image 3: TARGET MATERIAL CLOSE-UP (zoomed center crop — study this for micro-texture detail)' : ''}
-
-${textureAnalysis ? `MATERIAL ANALYSIS (pre-analyzed from reference):
-${textureAnalysis}
-` : ''}
-${userInput ? `USER INSTRUCTION: "${userInput}"
-` : ''}
-TASK: Replace the product's fabric/surface in Image 1 with the EXACT material from the reference images.
-
-TEXTURE REPRODUCTION (CRITICAL — this is the #1 priority):
-1. COPY the reference material's texture EXACTLY — same weave structure, same yarn/fiber density, same surface grain pattern. Do NOT invent a simplified or smoothed version.
-2. The texture must show INDIVIDUAL FIBER/YARN DETAIL at the pixel level — every thread crossing, every fiber tuft, every surface irregularity from the reference must be reproduced.
-3. COLOR must have the same DEPTH and VARIATION as the reference — real fabrics are never one flat color. Reproduce the lighter/darker areas caused by fiber direction, pile compression, and light angle.
-4. SCALE the texture pattern correctly to the product's size — a sofa cushion shows more visible weave detail than a small swatch.
-
-LIGHT INTERACTION (CRITICAL — this makes or breaks realism):
-1. Recalculate how the scene's existing lighting hits the NEW material's surface properties.
-2. Matte/plush fabrics: soft light absorption with gradual shadow transitions, NO sharp specular highlights.
-3. Velvet/chenille: directional sheen where fibers lean — lighter when nap faces the light source, darker when facing away.
-4. Preserve the original scene's light direction, color temperature, and shadow patterns — only change how the NEW material responds to them.
-5. Shadows in fabric folds must show DARKER tone of the same material (compressed fibers), not black voids.
-
-3D SURFACE MAPPING:
-1. Texture must WRAP around the product's 3D form — following contours, seams, and edges.
-2. On curved/convex surfaces: texture slightly stretches and catches more light.
-3. In creases/folds: texture compresses and appears darker/denser.
-4. At edges/seams: fabric shows its thickness and construction.
-
-ABSOLUTE CONSTRAINTS:
-- DO NOT smooth, blur, or simplify ANY texture — if it looks too clean, it's wrong.
-- DO NOT change product shape, silhouette, proportions, camera angle, background, or non-fabric elements (legs, frames, hardware, buttons, zippers).
-- DO NOT change the scene composition, other objects, or background.
-- Preserve all seam lines and construction details.
-
-QUALITY: Photorealistic, 8K resolution. The replaced material must look identical to how the reference fabric would appear if physically upholstered onto this product and photographed with the same camera setup.`;
-                } else if (hasOriginal && !hasMaterialRef) {
-                    // 只有原图，没有面料参考 — 根据文字描述换色
-                    prompt = `MATERIAL/COLOR REPLACEMENT BY DESCRIPTION
-
-INPUT: Image 1 is the ORIGINAL PRODUCT. Preserve exact composition, camera angle, lighting, background, shadows.
-
-TASK: ${userInput ? `"${userInput}" — Apply this change to the product's surface material/color.` : 'Please describe the target color or material.'}
-
-TEXTURE REQUIREMENTS:
-- The new material must show REALISTIC micro-texture: visible weave/grain/fiber structure appropriate to the material type.
-- Color must have natural DEPTH and VARIATION — never flat or uniform. Real materials show subtle lighter/darker areas from surface geometry and light angle.
-- Light interaction must match the material type: matte fabrics absorb softly, glossy surfaces show reflections, textured surfaces show shadow in crevices.
-- Texture wraps naturally around 3D form — stretched on curves, compressed in folds.
-- Do NOT smooth or flatten — maintain tangible, touchable surface quality.
-
-CONSTRAINTS: Do NOT change shape, composition, background, camera angle, or non-surface elements (legs, frames, hardware). Photorealistic, 8K.`;
-                } else {
-                    prompt = `请上传要换色的产品原图，以及目标颜色/面料的参考图。`;
-                }
-
                 let generatedImageUrl: string | null = null;
                 let textResponse: string = "";
 
                 if (apiProvider === 'kie') {
+                    // --- KIE.ai path ---
+                    let kieReskinPrompt = "";
+                    if (hasOriginal && hasMaterialRef) {
+                        kieReskinPrompt = `RESKIN TASK: Replace the surface material of the product.
+
+The FIRST image is the ORIGINAL PRODUCT — keep its exact shape, silhouette, camera angle, background, and all non-surface elements (legs, frames, hardware) completely unchanged.
+
+The SECOND image is the TARGET MATERIAL/FABRIC REFERENCE — extract the color, texture, weave pattern, and surface quality from this swatch.
+
+Generate a NEW photo of the ORIGINAL PRODUCT with its fabric/surface replaced by the TARGET MATERIAL. The output must be a complete product photo, NOT a fabric swatch.
+
+Requirements:
+- Texture wraps naturally around the product's 3D form (stretched on curves, compressed in folds)
+- Lighting interaction matches the new material (matte absorbs, velvet has directional sheen)
+- Preserve all seams, stitching, and construction details
+- Photorealistic quality, indistinguishable from a real photograph${userInput ? `\n\nAdditional instruction: ${userInput}` : ''}`;
+                    } else if (hasOriginal) {
+                        kieReskinPrompt = `Change the color/material of the product in this image.${userInput ? ` Instruction: ${userInput}` : ''} Keep shape, angle, background identical. Photorealistic.`;
+                    } else {
+                        kieReskinPrompt = `Please provide a product image to reskin.`;
+                    }
+
                     const inputImages: string[] = [...currentImages];
                     currentSceneRefs.forEach(ref => inputImages.push(ref));
-                    generatedImageUrl = await kieGenerateImage(prompt, inputImages, {
+                    generatedImageUrl = await kieGenerateImage(kieReskinPrompt, inputImages, {
                         aspectRatio: aspectRatio,
                         resolution: resolution,
                         outputFormat: outputFormat
                     });
                 } else {
+                    // --- Google SDK path: interleave text labels with images ---
                     const parts: any[] = [];
-                    // Original product image(s) — JPEG compression OK
-                    for (const img of currentImages) {
-                      const compressed = await compressImageForApi(img);
-                      const base64Data = compressed.split(',')[1];
-                      const mimeType = compressed.split(';')[0].split(':')[1];
-                      parts.push({ inlineData: { mimeType: mimeType, data: base64Data } });
+
+                    if (hasOriginal && hasMaterialRef) {
+                        // CRITICAL FIX: Label each image explicitly with text parts
+                        // This prevents the model from confusing product vs reference
+                        parts.push({ text: `[ORIGINAL PRODUCT PHOTO — this is the product to modify. Keep its exact shape, pose, angle, background, and all non-fabric elements identical:]` });
+                        
+                        for (const img of currentImages) {
+                          const compressed = await compressImageForApi(img);
+                          parts.push({ inlineData: { mimeType: compressed.split(';')[0].split(':')[1], data: compressed.split(',')[1] } });
+                        }
+
+                        parts.push({ text: `[TARGET MATERIAL/FABRIC REFERENCE — extract color, texture, and weave pattern from this swatch to apply onto the product above:]` });
+                        
+                        for (const ref of currentSceneRefs) {
+                          const preserved = await compressImagePreservePng(ref);
+                          parts.push({ inlineData: { mimeType: preserved.split(';')[0].split(':')[1], data: preserved.split(',')[1] } });
+                        }
+
+                        // Build a focused, clear prompt
+                        parts.push({ text: `TASK: Generate a NEW image of the original product above, with its surface material REPLACED by the target material/fabric shown in the reference.
+${textureAnalysis ? `\nMaterial description: ${textureAnalysis}\n` : ''}${userInput ? `\nUser instruction: "${userInput}"\n` : ''}
+CRITICAL OUTPUT RULES:
+1. Output must be a COMPLETE PRODUCT PHOTO showing the full product — NOT a fabric swatch, NOT just the material texture, NOT a close-up of fabric.
+2. The product shape, silhouette, proportions, camera angle, background, and all non-surface elements (legs, frames, hardware, buttons, zippers) must be IDENTICAL to the original.
+3. ONLY the fabric/surface material changes — everything else stays exactly the same.
+
+TEXTURE REQUIREMENTS:
+- Copy the reference material's exact color, weave pattern, and surface grain onto the product
+- Texture must wrap naturally around the product's 3D form (stretch on curves, compress in folds)
+- Color must have natural depth and variation — not flat or uniform
+- Recalculate lighting interaction for the new material's surface properties
+- Preserve seam lines and construction details
+
+OUTPUT: One photorealistic product photo, 8K quality, indistinguishable from a real photograph.` });
+
+                    } else if (hasOriginal && !hasMaterialRef) {
+                        // Only product image, text-based color/material change
+                        parts.push({ text: `[ORIGINAL PRODUCT PHOTO — modify its surface color/material as instructed:]` });
+                        for (const img of currentImages) {
+                          const compressed = await compressImageForApi(img);
+                          parts.push({ inlineData: { mimeType: compressed.split(';')[0].split(':')[1], data: compressed.split(',')[1] } });
+                        }
+                        parts.push({ text: `TASK: ${userInput ? `"${userInput}" — Apply this color/material change to the product.` : 'Please describe the target color or material.'}
+
+OUTPUT RULES:
+1. Output a COMPLETE PRODUCT PHOTO with the new color/material applied — NOT a swatch or texture sample.
+2. Keep shape, composition, background, camera angle, and non-surface elements identical.
+3. New material must show realistic texture with natural color variation.
+Photorealistic, 8K quality.` });
+                    } else {
+                        parts.push({ text: `请上传要换色的产品原图，以及目标颜色/面料的参考图。` });
                     }
-                    // Material reference image(s) — preserve PNG quality for texture detail
-                    for (const ref of currentSceneRefs) {
-                      const preserved = await compressImagePreservePng(ref);
-                      const refBase64 = preserved.split(',')[1];
-                      const refMime = preserved.split(';')[0].split(':')[1];
-                      parts.push({ inlineData: { mimeType: refMime, data: refBase64 } });
-                    }
-                    // Add center crop of first reference for micro-texture detail emphasis
-                    if (currentSceneRefs.length > 0) {
-                      try {
-                        const textureCrop = await extractTextureCrop(currentSceneRefs[0], 0.4);
-                        const cropCompressed = await compressImagePreservePng(textureCrop);
-                        const cropBase64 = cropCompressed.split(',')[1];
-                        const cropMime = cropCompressed.split(';')[0].split(':')[1];
-                        parts.push({ inlineData: { mimeType: cropMime, data: cropBase64 } });
-                      } catch (e) {
-                        console.warn("Texture crop extraction failed:", e);
-                      }
-                    }
-                    parts.push({ text: prompt });
 
                     const response = await generateWithRetry(
                         selectedImageModel,
@@ -1436,7 +1398,7 @@ CONSTRAINTS: Do NOT change shape, composition, background, camera angle, or non-
                     }
                 }
 
-                // Update thinking message with result
+                // Display result
                 if (generatedImageUrl) {
                     generatedImageUrl = await convertImageFormat(generatedImageUrl, outputFormat);
                     addMessage({ id: baseId + 1, role: 'assistant', type: 'image', content: generatedImageUrl });
@@ -2798,7 +2760,7 @@ ${qualitySuffix}`;
             <div className="flex flex-col xl:flex-row gap-4 mb-4 items-start xl:items-center justify-between">
               <div className={`text-xs font-medium px-4 py-2 rounded-xl border shadow-sm transition-colors flex items-center gap-2 ${mode === 'master' ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:border-purple-800 dark:text-purple-300' : mode === 'reskin' ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300' : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-800 dark:text-indigo-300'}`}>
                 <span className={`w-2 h-2 rounded-full ${mode === 'master' ? 'bg-purple-500' : mode === 'reskin' ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse`}></span>
-                {mode === 'master' ? '✨ 生图大师模式 (合成)' : mode === 'reskin' ? '🎨 换色换料模式 (替换面料/颜色)' : '📐 提示词架构师 (解析)'}
+                {mode === 'master' ? '✨ 生图大师模式 (合成)' : mode === 'reskin' ? '🎨 换色换料模式 (替换产品面料/颜色)' : '📐 提示词架构师 (解析)'}
               </div>
 
               {/* Toolbar: For Master and Reskin Modes */}
