@@ -2083,7 +2083,7 @@ ${qualitySuffix}`;
 
   // ========== E-commerce Task Panel Callbacks ==========
   const ecommerceGenerateImage = async (prompt: string, images: string[], options: {
-    aspectRatio: string; resolution: string; outputFormat: string;
+    aspectRatio: string; resolution: string; outputFormat: string; isMask?: boolean;
   }): Promise<string | null> => {
     const validRatio = toValidApiRatio(options.aspectRatio);
     if (apiProvider === 'kie') {
@@ -2091,6 +2091,7 @@ ${qualitySuffix}`;
         aspectRatio: validRatio,
         resolution: options.resolution,
         outputFormat: options.outputFormat,
+        ...(options.isMask ? { isMask: true } : {}),
       });
     } else {
       const ai = getAiClient();

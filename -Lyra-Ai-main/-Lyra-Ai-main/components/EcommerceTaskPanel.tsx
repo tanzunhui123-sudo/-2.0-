@@ -4,12 +4,15 @@ import {
   Upload, Image as ImageIcon, Loader2, Check, RefreshCw, Edit3,
   Eye, History, GripHorizontal, Maximize2, ZoomIn, ZoomOut, RotateCcw,
   ShoppingBag, FileText, Store, ChevronDown, Send, Lock, Unlock,
-  ArrowUp, ArrowDown, Trash2, Settings, Layers, ImagePlus
+  ArrowUp, ArrowDown, Trash2, Settings, Layers, ImagePlus,
+  Paintbrush, Type
 } from 'lucide-react';
 import {
   EcommerceTask, TaskType, TaskStatus, FloorImage, TaskPlan, AgentMessage, EcommercePlatform
 } from '../types';
 import { ECOMMERCE_PLATFORMS, DETAIL_PAGE_SECTIONS, PLATFORM_FLOOR_RATIOS } from '../constants';
+import InpaintingModal from './InpaintingModal';
+import { TextEditorModal } from './TextEditorModal';
 
 // ========== Helper: Generate unique ID ==========
 const genId = () => `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -47,6 +50,7 @@ interface EcommerceTaskPanelProps {
     aspectRatio: string;
     resolution: string;
     outputFormat: string;
+    isMask?: boolean;
   }) => Promise<string | null>;
   onGenerateText: (prompt: string, images: string[]) => Promise<string>;
   apiProvider: 'google' | 'kie' | 'custom';
@@ -74,6 +78,11 @@ export default function EcommerceTaskPanel({ onGenerateImage, onGenerateText, ap
   const [showInsertMenu, setShowInsertMenu] = useState<{idx: number, position: 'before' | 'after'} | null>(null);
   const [showDownloadPanel, setShowDownloadPanel] = useState(false);
   const [downloadUnlocked, setDownloadUnlocked] = useState(false);
+
+  // Inpainting & Text Editor State
+  const [inpaintFloorIdx, setInpaintFloorIdx] = useState<number | null>(null);
+  const [isInpaintLoading, setIsInpaintLoading] = useState(false);
+  const [textEditorFloorIdx, setTextEditorFloorIdx] = useState<number | null>(null);
 
   // Refs
   const productImgRef = useRef<HTMLInputElement>(null);
@@ -421,6 +430,51 @@ ${historyContext}
       ? platformConfig.mainImageSizes 
       : platformConfig.detailPageSizes;
     const sizePreset = sizePresets[0];
+
+    // ── Scene consistency: analyse the first product image and derive a shared scene ──
+    let sceneContext = '';
+    if (productImages.length > 0) {
+      try {
+        const sceneAnalysis = await onGenerateText(
+          `请分析这张商品图片，判断：
+1. 商品是否在纯白/纯色/简单背景上？
+2. 或者商品已经有场景/环境背景（如室内、生活场景等）？
+
+请用以下格式回答（JSON）：
+{"hasScene": true/false, "sceneDescription": "如果有场景，详细描述场景的环境、光线、氛围，如无场景则为空字符串"}
+
+只输出 JSON，不要额外解释。`,
+          [productImages[0]]
+        );
+        const jsonMatch = sceneAnalysis.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (parsed.hasScene && parsed.sceneDescription) {
+            sceneContext = parsed.sceneDescription;
+          } else {
+            // White background product — generate a consistent scene for this series
+            const sceneSuggestion = await onGenerateText(
+              `这是一款商品（${productName}）。请为其电商${taskType === 'mainImage' ? '主图' : '详情页'}系列图片推荐一个统一的高品质场景设定。
+要求：
+- 场景与商品品类搭配
+- 适合电商平台风格
+- 光线、背景、氛围描述清晰，易于图像生成复现
+
+只输出场景描述（1-3句，英文），不要解释。`,
+              [productImages[0]]
+            );
+            sceneContext = sceneSuggestion.trim();
+          }
+        }
+      } catch (e) {
+        // Scene analysis is best-effort; don't block generation
+        console.warn('Scene analysis failed, proceeding without scene context', e);
+      }
+    }
+    // Save sceneContext to task for reference
+    if (sceneContext) {
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, sceneContext } : t));
+    }
     
     // Generate each floor
     const newFloors: FloorImage[] = [];
@@ -446,6 +500,7 @@ ${historyContext}
 商品信息：${productInfo}
 设计要求：${designRequirements || '无'}
 语言：${language}
+${sceneContext ? `\n【场景一致性要求】本系列所有图片必须使用同一场景设定：${sceneContext}\n请严格保持该场景的环境、光线、氛围与整个系列一致。` : ''}
 
 当前要生成的是第${i + 1}层楼层图：${floorDesc}
 
@@ -610,6 +665,58 @@ ABSOLUTE CONSTRAINTS:
     } catch (err) {
       console.error('Modification failed:', err);
     }
+  };
+
+  // Floor inpainting via brush mask
+  const handleFloorInpaintGenerate = async (
+    maskBase64: string, prompt: string, referenceImage?: string, materialImage?: string
+  ) => {
+    if (inpaintFloorIdx === null || !activeTask) return;
+    const floor = activeTask.floors[inpaintFloorIdx];
+    if (!floor) return;
+
+    setIsInpaintLoading(true);
+    try {
+      const extraImages: string[] = [];
+      if (referenceImage) extraImages.push(referenceImage);
+      if (materialImage) extraImages.push(materialImage);
+
+      const newUrl = await onGenerateImage(
+        prompt || `对画面中已涂抹区域进行局部重绘，保持其余区域不变。`,
+        [floor.url, maskBase64, ...extraImages],
+        { aspectRatio: floor.ratio, resolution: activeTask.resolution, outputFormat: 'png', isMask: true }
+      );
+
+      if (newUrl) {
+        const updatedFloors = [...activeTask.floors];
+        updatedFloors[inpaintFloorIdx] = {
+          ...floor,
+          url: newUrl,
+          history: [...floor.history, newUrl],
+        };
+        updateTask(activeTask.id, { floors: updatedFloors });
+        setInpaintFloorIdx(null);
+      }
+    } catch (err) {
+      console.error('Inpainting failed:', err);
+    } finally {
+      setIsInpaintLoading(false);
+    }
+  };
+
+  // Text editor: save composited image back to floor
+  const handleTextEditorSave = (dataUrl: string) => {
+    if (textEditorFloorIdx === null || !activeTask) return;
+    const floor = activeTask.floors[textEditorFloorIdx];
+    if (!floor) return;
+    const updatedFloors = [...activeTask.floors];
+    updatedFloors[textEditorFloorIdx] = {
+      ...floor,
+      url: dataUrl,
+      history: [...floor.history, dataUrl],
+    };
+    updateTask(activeTask.id, { floors: updatedFloors });
+    setTextEditorFloorIdx(null);
   };
 
   const handleFloorReorder = (fromIdx: number, toIdx: number) => {
@@ -1365,6 +1472,18 @@ ABSOLUTE CONSTRAINTS:
                           <Edit3 size={11} className="text-white" />
                         </button>
                         <button
+                          onClick={(e) => { e.stopPropagation(); setInpaintFloorIdx(idx); }}
+                          className="p-1.5 bg-white/20 hover:bg-white/40 rounded-lg transition-colors" title="局部重绘"
+                        >
+                          <Paintbrush size={11} className="text-white" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setActiveFloorIdx(idx); setTextEditorFloorIdx(idx); }}
+                          className="p-1.5 bg-white/20 hover:bg-white/40 rounded-lg transition-colors" title="文字编辑"
+                        >
+                          <Type size={11} className="text-white" />
+                        </button>
+                        <button
                           onClick={(e) => { e.stopPropagation(); handleDownloadSingle(floor.url, `楼层${idx + 1}.png`); }}
                           className="p-1.5 bg-white/20 hover:bg-white/40 rounded-lg transition-colors" title="下载"
                         >
@@ -1420,6 +1539,18 @@ ABSOLUTE CONSTRAINTS:
                         className={`p-1.5 rounded-lg transition-colors ${showFloorModify ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/20' : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20'}`} title="修改图片"
                       >
                         <Edit3 size={15} />
+                      </button>
+                      <button
+                        onClick={() => setInpaintFloorIdx(activeFloorIdx)}
+                        className={`p-1.5 rounded-lg transition-colors ${inpaintFloorIdx === activeFloorIdx ? 'text-violet-600 bg-violet-50 dark:bg-violet-900/20' : 'text-slate-500 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-900/20'}`} title="局部重绘（画笔遮罩）"
+                      >
+                        <Paintbrush size={15} />
+                      </button>
+                      <button
+                        onClick={() => setTextEditorFloorIdx(activeFloorIdx)}
+                        className={`p-1.5 rounded-lg transition-colors ${textEditorFloorIdx === activeFloorIdx ? 'text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20' : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}`} title="文字编辑"
+                      >
+                        <Type size={15} />
                       </button>
                       <button
                         onClick={() => handleDownloadSingle(activeTask.floors[activeFloorIdx].url, `${activeTask.productName}_楼层${activeFloorIdx + 1}.png`)}
@@ -1587,6 +1718,35 @@ ABSOLUTE CONSTRAINTS:
             </p>
           </div>
         </div>
+      )}
+
+      {/* ── Inpainting Modal ─────────────────────────────────────────── */}
+      {inpaintFloorIdx !== null && activeTask && activeTask.floors[inpaintFloorIdx] && (
+        <div className="fixed inset-0 z-50">
+          {isInpaintLoading && (
+            <div className="absolute inset-0 z-60 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+              <div className="flex items-center gap-3 px-6 py-4 bg-slate-800 rounded-2xl shadow-2xl">
+                <Loader2 size={20} className="text-violet-400 animate-spin" />
+                <span className="text-white text-sm font-medium">局部重绘中...</span>
+              </div>
+            </div>
+          )}
+          <InpaintingModal
+            isOpen={true}
+            onClose={() => setInpaintFloorIdx(null)}
+            imageUrl={activeTask.floors[inpaintFloorIdx].url}
+            onGenerate={handleFloorInpaintGenerate}
+          />
+        </div>
+      )}
+
+      {/* ── Text Editor Modal ────────────────────────────────────────── */}
+      {textEditorFloorIdx !== null && activeTask && activeTask.floors[textEditorFloorIdx] && (
+        <TextEditorModal
+          imageUrl={activeTask.floors[textEditorFloorIdx].url}
+          onSave={handleTextEditorSave}
+          onClose={() => setTextEditorFloorIdx(null)}
+        />
       )}
     </div>
   );

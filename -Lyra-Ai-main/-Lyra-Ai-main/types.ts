@@ -90,4 +90,5 @@ export interface EcommerceTask {
   // 生成结果
   floors: FloorImage[];            // 楼层图片
   longImageUrl?: string;           // 合成长图
+  sceneContext?: string;           // 场景一致性描述（AI 分析后自动填充）
 }
