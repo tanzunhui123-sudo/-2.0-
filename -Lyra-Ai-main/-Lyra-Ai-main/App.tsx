@@ -2596,9 +2596,20 @@ ${qualitySuffix}`;
                         连接后，生成的图片可自动按日期保存到您的云盘 📂
                     </p>
 
+                    {/* Error 403 fix notice */}
+                    <div className="mb-4 rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40 p-3 flex gap-2.5">
+                        <AlertTriangle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
+                        <div className="text-xs text-red-700 dark:text-red-300 leading-relaxed">
+                            <strong>遇到「禁止访问 / 错误 403」？</strong> 这是因为您的账号还没加入测试用户白名单。<br/>
+                            请打开&nbsp;
+                            <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noopener noreferrer" className="underline font-medium">OAuth 同意屏幕</a>
+                            &nbsp;→ 滚动到最下方「<strong>测试用户</strong>」→ 点「Add Users」→ 填入您的 Gmail → 保存，然后重新点「Connect Drive」即可。
+                        </div>
+                    </div>
+
                     {/* Step-by-step guide */}
                     <div className="mb-4 rounded-xl border border-indigo-100 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 p-4">
-                        <div className="text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-3">📋 如何获取 Client ID？（按顺序点击，约 3 分钟）</div>
+                        <div className="text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-3">📋 首次配置步骤（按顺序点击，约 3 分钟）</div>
                         <ol className="space-y-3 text-xs text-slate-600 dark:text-slate-300">
                             <li className="flex gap-2.5 items-start">
                                 <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center flex-shrink-0 font-bold text-[10px] mt-0.5">1</span>
@@ -2618,14 +2629,14 @@ ${qualitySuffix}`;
                                 <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center flex-shrink-0 font-bold text-[10px] mt-0.5">3</span>
                                 <span>打开&nbsp;
                                     <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 underline font-medium">OAuth 同意屏幕</a>
-                                    &nbsp;→ 选「外部」→ 填写应用名称（如「Lyra Studio」）和您的 Gmail → 保存
+                                    &nbsp;→ 选「外部」→ 填应用名称（如「Lyra Studio」）和您的 Gmail → 保存 → 滚动到「<strong>测试用户</strong>」→ 点「Add Users」→ <strong>填入您自己的 Gmail</strong> → 保存
                                 </span>
                             </li>
                             <li className="flex gap-2.5 items-start">
                                 <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center flex-shrink-0 font-bold text-[10px] mt-0.5">4</span>
                                 <span>打开&nbsp;
                                     <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 underline font-medium">API 凭据页</a>
-                                    &nbsp;→ 点「创建凭据」→「OAuth 客户端 ID」→ 应用类型选「<strong>网页应用</strong>」→ 在「已授权的 JavaScript 来源」添加您的网站地址（本地开发填 <code className="bg-white dark:bg-slate-800 px-1 rounded border border-slate-200 dark:border-slate-700">http://localhost:5173</code>）→ 点「创建」
+                                    &nbsp;→ 点「创建凭据」→「OAuth 客户端 ID」→ 应用类型选「<strong>网页应用</strong>」→ 在「已授权的 JavaScript 来源」填您的网址（如 <code className="bg-white dark:bg-slate-800 px-1 rounded border border-slate-200 dark:border-slate-700">https://2-0-z4a1.onrender.com</code>）→ 点「创建」
                                 </span>
                             </li>
                             <li className="flex gap-2.5 items-start">
