@@ -415,6 +415,7 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
   // Drive image save state
   const [isDriveImageSaving, setIsDriveImageSaving] = useState(false);
   const [driveImageSaveMsg, setDriveImageSaveMsg] = useState<string | null>(null);
+  const [driveImageSaveLink, setDriveImageSaveLink] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -566,6 +567,7 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
       if (isDriveImageSaving) return;
       setIsDriveImageSaving(true);
       setDriveImageSaveMsg(null);
+      setDriveImageSaveLink(null);
       try {
           // Ensure we have a data URI (fetch remote URLs first)
           let dataUri = imageUrl;
@@ -579,14 +581,19 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
                   reader.readAsDataURL(blob);
               });
           }
-          await saveImageToDriveByDate(dataUri);
-          setDriveImageSaveMsg('✅ 已保存到 Google Drive');
+          const now = new Date();
+          const y = now.getFullYear();
+          const m = String(now.getMonth() + 1).padStart(2, '0');
+          const d = String(now.getDate()).padStart(2, '0');
+          const fileLink = await saveImageToDriveByDate(dataUri);
+          setDriveImageSaveLink(fileLink || 'https://drive.google.com');
+          setDriveImageSaveMsg(`✅ 已保存到 Drive: LyraStudio/${y}/${m}/${d}/`);
       } catch (e: any) {
           console.error('Drive image save error:', e);
           setDriveImageSaveMsg(`❌ 保存失败: ${e.message || '未知错误'}`);
       } finally {
           setIsDriveImageSaving(false);
-          setTimeout(() => setDriveImageSaveMsg(null), 3500);
+          setTimeout(() => { setDriveImageSaveMsg(null); setDriveImageSaveLink(null); }, 8000);
       }
   };
 
@@ -2341,7 +2348,18 @@ ${qualitySuffix}`;
       {driveImageSaveMsg && (
         <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-5 py-3 rounded-2xl shadow-xl text-sm font-medium animate-in slide-in-from-bottom-4 fade-in duration-300 ${driveImageSaveMsg.startsWith('✅') ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
           <Cloud size={16} />
-          {driveImageSaveMsg}
+          <span>{driveImageSaveMsg}</span>
+          {driveImageSaveLink && driveImageSaveMsg.startsWith('✅') && (
+            <a
+              href={driveImageSaveLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-1 underline underline-offset-2 hover:opacity-80 font-bold whitespace-nowrap"
+              onClick={(e) => e.stopPropagation()}
+            >
+              点击查看 →
+            </a>
+          )}
         </div>
       )}
 
