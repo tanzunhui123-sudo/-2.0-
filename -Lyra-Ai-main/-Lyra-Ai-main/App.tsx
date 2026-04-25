@@ -2588,19 +2588,58 @@ ${qualitySuffix}`;
         {/* Client ID Input Modal */}
         {showClientIdInput && (
             <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-                <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-md border border-slate-200 dark:border-slate-800">
-                    <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2">
-                        <Key size={20} className="text-indigo-500"/> Configure Drive
+                <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-lg border border-slate-200 dark:border-slate-800 max-h-[92vh] overflow-y-auto">
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-1 flex items-center gap-2">
+                        <Cloud size={20} className="text-indigo-500"/> 连接 Google Drive
                     </h3>
                     <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-                        To enable Cloud Sync, please enter your Google OAuth 2.0 Client ID. 
-                        You can find this in your Google Cloud Console.
+                        连接后，生成的图片可自动按日期保存到您的云盘 📂
                     </p>
+
+                    {/* Step-by-step guide */}
+                    <div className="mb-4 rounded-xl border border-indigo-100 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 p-4">
+                        <div className="text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-3">📋 如何获取 Client ID？（按顺序点击，约 3 分钟）</div>
+                        <ol className="space-y-3 text-xs text-slate-600 dark:text-slate-300">
+                            <li className="flex gap-2.5 items-start">
+                                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center flex-shrink-0 font-bold text-[10px] mt-0.5">1</span>
+                                <span>打开&nbsp;
+                                    <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 underline font-medium">新建 Google Cloud 项目</a>
+                                    &nbsp;→ 项目名随意填（如「Lyra」）→ 点「创建」
+                                </span>
+                            </li>
+                            <li className="flex gap-2.5 items-start">
+                                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center flex-shrink-0 font-bold text-[10px] mt-0.5">2</span>
+                                <span>打开&nbsp;
+                                    <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 underline font-medium">启用 Google Drive API</a>
+                                    &nbsp;→ 确认左上角已选中刚建的项目 → 点「启用」
+                                </span>
+                            </li>
+                            <li className="flex gap-2.5 items-start">
+                                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center flex-shrink-0 font-bold text-[10px] mt-0.5">3</span>
+                                <span>打开&nbsp;
+                                    <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 underline font-medium">OAuth 同意屏幕</a>
+                                    &nbsp;→ 选「外部」→ 填写应用名称（如「Lyra Studio」）和您的 Gmail → 保存
+                                </span>
+                            </li>
+                            <li className="flex gap-2.5 items-start">
+                                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center flex-shrink-0 font-bold text-[10px] mt-0.5">4</span>
+                                <span>打开&nbsp;
+                                    <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 underline font-medium">API 凭据页</a>
+                                    &nbsp;→ 点「创建凭据」→「OAuth 客户端 ID」→ 应用类型选「<strong>网页应用</strong>」→ 在「已授权的 JavaScript 来源」添加您的网站地址（本地开发填 <code className="bg-white dark:bg-slate-800 px-1 rounded border border-slate-200 dark:border-slate-700">http://localhost:5173</code>）→ 点「创建」
+                                </span>
+                            </li>
+                            <li className="flex gap-2.5 items-start">
+                                <span className="w-5 h-5 rounded-full bg-green-600 text-white flex items-center justify-center flex-shrink-0 font-bold text-[10px] mt-0.5">5</span>
+                                <span>弹出窗口里复制「<strong>客户端 ID</strong>」（格式：<code className="bg-white dark:bg-slate-800 px-1 rounded border border-slate-200 dark:border-slate-700">xxxxxx.apps.googleusercontent.com</code>）→ 粘贴到下方输入框</span>
+                            </li>
+                        </ol>
+                    </div>
+
                     <input 
                         type="text"
                         value={clientId}
                         onChange={(e) => setClientId(e.target.value)}
-                        placeholder="apps.googleusercontent.com"
+                        placeholder="粘贴 Client ID：xxxxxx.apps.googleusercontent.com"
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl mb-4 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
                     <div className="flex justify-end gap-3">
@@ -2608,22 +2647,19 @@ ${qualitySuffix}`;
                             onClick={() => setShowClientIdInput(false)}
                             className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
                         >
-                            Cancel
+                            取消
                         </button>
                         <button 
                             onClick={saveClientId}
                             disabled={!clientId.trim()}
                             className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm disabled:opacity-50 transition-all"
                         >
-                            Save & Connect
+                            保存并连接
                         </button>
                     </div>
-                    <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-100 dark:border-yellow-800 flex gap-2">
-                        <AlertTriangle size={16} className="text-yellow-600 dark:text-yellow-500 flex-shrink-0 mt-0.5" />
-                        <span className="text-[10px] text-yellow-700 dark:text-yellow-400 leading-tight">
-                            Ensure your OAuth Client is configured with "https://www.googleapis.com/auth/drive.file" scope and the correct Authorized Origin.
-                        </span>
-                    </div>
+                    <p className="text-[10px] text-slate-400 mt-3 text-center">
+                        🔒 Client ID 仅保存在本地浏览器，不会上传到任何服务器
+                    </p>
                 </div>
             </div>
         )}
