@@ -466,11 +466,7 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
 
   const initializeDriveApi = async (cid: string) => {
     try {
-        // Use the same Gemini Key for GAPI discovery/init if possible, or fallback
-        // Note: Drive API needs OAuth, apiKey is for discovery quota usually
-        const apiKey = process.env.API_KEY || ''; 
-        await initGapiClient(apiKey);
-        
+        await initGapiClient(''); // no-op now, kept for compatibility
         initGisClient(cid, async (tokenResponse) => {
             if (tokenResponse && tokenResponse.access_token) {
                 setIsDriveConnected(true);

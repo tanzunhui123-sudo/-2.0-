@@ -388,13 +388,12 @@ export const clearHistoryDB = async () => {
 declare var gapi: any;
 declare var google: any;
 
-const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
 const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 const DRIVE_FILE_NAME = 'lyra_chat_history.json';
+const DRIVE_API = 'https://www.googleapis.com/drive/v3';
+const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 
-// NOTE: We need a placeholder here. In a real app, you'd use a real Client ID.
-// For the user's specific request, we will allow them to input it in the UI or use a stored one.
-export const DEFAULT_CLIENT_ID = ''; 
+export const DEFAULT_CLIENT_ID = '';
 
 export interface DriveFile {
   id: string;
@@ -402,29 +401,24 @@ export interface DriveFile {
 }
 
 let tokenClient: any;
-let gapiInited = false;
 let gisInited = false;
+// Store the access token directly — no dependency on gapi.client.drive.*
+let _driveAccessToken = '';
+
+/** Get the stored access token */
+const getDriveToken = (): string => {
+    if (_driveAccessToken) return _driveAccessToken;
+    // Fallback: try gapi if available
+    try { return (gapi as any).client.getToken()?.access_token || ''; } catch { return ''; }
+};
 
 /**
- * Initialize Google API Client (GAPI)
+ * Initialize Google API Client (GAPI) — minimal load, no discoveryDocs needed.
+ * We use direct REST fetch calls for Drive, so we don't need the discovery doc.
  */
-export const initGapiClient = async (apiKey: string) => {
-    if (gapiInited) return;
-    return new Promise<void>((resolve, reject) => {
-        // @ts-ignore
-        gapi.load('client', async () => {
-            try {
-                await gapi.client.init({
-                    apiKey: apiKey,
-                    discoveryDocs: [DISCOVERY_DOC],
-                });
-                gapiInited = true;
-                resolve();
-            } catch (err) {
-                reject(err);
-            }
-        });
-    });
+export const initGapiClient = async (_apiKey: string) => {
+    // No-op: we no longer depend on gapi.client.drive.* so no initialization needed.
+    return Promise.resolve();
 };
 
 /**
@@ -432,17 +426,19 @@ export const initGapiClient = async (apiKey: string) => {
  */
 export const initGisClient = (clientId: string, callback: (response: any) => void) => {
     if (gisInited && tokenClient) return tokenClient;
-    
+
     // @ts-ignore
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: SCOPES,
         callback: (resp: any) => {
-             if (resp.error) {
-                 console.error("GIS Error:", resp);
-                 throw resp;
-             }
-             callback(resp);
+            if (resp.error) {
+                console.error('GIS Error:', resp);
+                throw resp;
+            }
+            // Store token ourselves so all fetch calls can use it
+            _driveAccessToken = resp.access_token;
+            callback(resp);
         },
     });
     gisInited = true;
@@ -453,8 +449,33 @@ export const initGisClient = (clientId: string, callback: (response: any) => voi
  * Trigger the Auth flow
  */
 export const requestAccessToken = () => {
-    if (!tokenClient) throw new Error("Token Client not initialized");
+    if (!tokenClient) throw new Error('Token Client not initialized');
     tokenClient.requestAccessToken({ prompt: 'consent' });
+};
+
+/** Helper: Drive REST GET */
+const driveGet = async (path: string, params: Record<string, string> = {}) => {
+    const url = new URL(`${DRIVE_API}/${path}`);
+    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+    const resp = await fetch(url.toString(), {
+        headers: { Authorization: 'Bearer ' + getDriveToken() },
+    });
+    if (!resp.ok) throw new Error(`Drive GET ${path} failed: ${resp.status} ${await resp.text()}`);
+    return resp.json();
+};
+
+/** Helper: Drive REST list with q param */
+const driveList = async (q: string, fields = 'files(id,name)'): Promise<any[]> => {
+    const url = new URL(`${DRIVE_API}/files`);
+    url.searchParams.set('q', q);
+    url.searchParams.set('fields', fields);
+    url.searchParams.set('spaces', 'drive');
+    const resp = await fetch(url.toString(), {
+        headers: { Authorization: 'Bearer ' + getDriveToken() },
+    });
+    if (!resp.ok) throw new Error(`Drive list failed: ${resp.status} ${await resp.text()}`);
+    const data = await resp.json();
+    return data.files || [];
 };
 
 /**
@@ -462,17 +483,10 @@ export const requestAccessToken = () => {
  */
 export const findHistoryFile = async (): Promise<DriveFile | null> => {
     try {
-        const response = await gapi.client.drive.files.list({
-            q: `name = '${DRIVE_FILE_NAME}' and trashed = false`,
-            fields: 'files(id, name)',
-        });
-        const files = response.result.files;
-        if (files && files.length > 0) {
-            return files[0] as DriveFile;
-        }
-        return null;
+        const files = await driveList(`name = '${DRIVE_FILE_NAME}' and trashed = false`);
+        return files.length > 0 ? files[0] as DriveFile : null;
     } catch (err) {
-        console.error("Error finding file:", err);
+        console.error('Error finding file:', err);
         return null;
     }
 };
@@ -481,56 +495,42 @@ export const findHistoryFile = async (): Promise<DriveFile | null> => {
  * Create a new history file in Drive
  */
 export const createHistoryFile = async (content: string): Promise<string> => {
-    const fileContent = new Blob([content], { type: 'application/json' });
-    const metadata = {
-        name: DRIVE_FILE_NAME,
-        mimeType: 'application/json',
-    };
-
-    const accessToken = gapi.client.getToken().access_token;
     const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }) as any);
-    form.append('file', fileContent as any);
-
-    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    form.append('metadata', new Blob([JSON.stringify({ name: DRIVE_FILE_NAME, mimeType: 'application/json' })], { type: 'application/json' }));
+    form.append('file', new Blob([content], { type: 'application/json' }));
+    const res = await fetch(`${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id`, {
         method: 'POST',
-        headers: new Headers({ 'Authorization': 'Bearer ' + accessToken }),
+        headers: { Authorization: 'Bearer ' + getDriveToken() },
         body: form,
     });
-    const val = await res.json();
-    return val.id;
+    if (!res.ok) throw new Error(`createHistoryFile failed: ${res.status} ${await res.text()}`);
+    return (await res.json()).id;
 };
 
 /**
  * Update existing file in Drive
  */
 export const updateHistoryFile = async (fileId: string, content: string) => {
-    const fileContent = new Blob([content], { type: 'application/json' });
-    const metadata = {
-        mimeType: 'application/json',
-    };
-
-    const accessToken = gapi.client.getToken().access_token;
     const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }) as any);
-    form.append('file', fileContent as any);
-
-    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`, {
+    form.append('metadata', new Blob([JSON.stringify({ mimeType: 'application/json' })], { type: 'application/json' }));
+    form.append('file', new Blob([content], { type: 'application/json' }));
+    const res = await fetch(`${DRIVE_UPLOAD_API}/files/${fileId}?uploadType=multipart`, {
         method: 'PATCH',
-        headers: new Headers({ 'Authorization': 'Bearer ' + accessToken }),
+        headers: { Authorization: 'Bearer ' + getDriveToken() },
         body: form,
     });
+    if (!res.ok) throw new Error(`updateHistoryFile failed: ${res.status} ${await res.text()}`);
 };
 
 /**
  * Read file content
  */
 export const getFileContent = async (fileId: string): Promise<Message[]> => {
-    const response = await gapi.client.drive.files.get({
-        fileId: fileId,
-        alt: 'media',
+    const resp = await fetch(`${DRIVE_API}/files/${fileId}?alt=media`, {
+        headers: { Authorization: 'Bearer ' + getDriveToken() },
     });
-    return response.result as Message[];
+    if (!resp.ok) throw new Error(`getFileContent failed: ${resp.status} ${await resp.text()}`);
+    return resp.json();
 };
 
 // ---- Google Drive Image Upload (Date-Organized Folders) ----
@@ -540,46 +540,20 @@ export const getFileContent = async (fileId: string): Promise<Message[]> => {
  * Returns the folder's file ID.
  */
 export const findOrCreateDriveFolder = async (name: string, parentId?: string): Promise<string> => {
-    const parentClause = parentId
-        ? `and '${parentId}' in parents`
-        : `and 'root' in parents`;
+    const parentClause = parentId ? `and '${parentId}' in parents` : `and 'root' in parents`;
     const q = `name = '${name}' and mimeType = 'application/vnd.google-apps.folder' ${parentClause} and trashed = false`;
+    const files = await driveList(q);
+    if (files.length > 0) return files[0].id;
 
-    const listResp = await gapi.client.drive.files.list({
-        q,
-        fields: 'files(id, name)',
-        spaces: 'drive',
-    });
-
-    const files = listResp.result.files;
-    if (files && files.length > 0) {
-        return files[0].id;
-    }
-
-    // Folder not found — create it
-    const metadata: any = {
-        name,
-        mimeType: 'application/vnd.google-apps.folder',
-    };
-    if (parentId) {
-        metadata.parents = [parentId];
-    }
-
-    const accessToken = gapi.client.getToken().access_token;
-    const resp = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+    const metadata: any = { name, mimeType: 'application/vnd.google-apps.folder' };
+    if (parentId) metadata.parents = [parentId];
+    const resp = await fetch(`${DRIVE_API}/files?fields=id`, {
         method: 'POST',
-        headers: {
-            'Authorization': 'Bearer ' + accessToken,
-            'Content-Type': 'application/json',
-        },
+        headers: { Authorization: 'Bearer ' + getDriveToken(), 'Content-Type': 'application/json' },
         body: JSON.stringify(metadata),
     });
-    if (!resp.ok) {
-        const errText = await resp.text();
-        throw new Error(`创建文件夹失败: ${resp.status} ${errText}`);
-    }
-    const result = await resp.json();
-    return result.id;
+    if (!resp.ok) throw new Error(`创建文件夹失败: ${resp.status} ${await resp.text()}`);
+    return (await resp.json()).id;
 };
 
 /**
@@ -618,16 +592,15 @@ export const saveImageToDriveByDate = async (base64DataUri: string, filename?: s
         parents: [dayId],
     };
 
-    const accessToken = gapi.client.getToken().access_token;
     const form = new FormData();
     form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
     form.append('file', imageBlob);
 
     const resp = await fetch(
-        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+        `${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id,name,webViewLink`,
         {
             method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + accessToken },
+            headers: { 'Authorization': 'Bearer ' + getDriveToken() },
             body: form,
         }
     );
