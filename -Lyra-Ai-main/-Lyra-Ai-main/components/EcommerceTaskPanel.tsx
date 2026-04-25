@@ -54,13 +54,15 @@ interface EcommerceTaskPanelProps {
   }) => Promise<string | null>;
   onGenerateText: (prompt: string, images: string[]) => Promise<string>;
   apiProvider: 'google' | 'kie' | 'custom';
+  tasks: EcommerceTask[];
+  setTasks: React.Dispatch<React.SetStateAction<EcommerceTask[]>>;
+  activeTaskId: string | null;
+  setActiveTaskId: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 // ========== Main Component ==========
-export default function EcommerceTaskPanel({ onGenerateImage, onGenerateText, apiProvider }: EcommerceTaskPanelProps) {
+export default function EcommerceTaskPanel({ onGenerateImage, onGenerateText, apiProvider, tasks, setTasks, activeTaskId, setActiveTaskId }: EcommerceTaskPanelProps) {
   // Task Management State
-  const [tasks, setTasks] = useState<EcommerceTask[]>([]);
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewTaskMenu, setShowNewTaskMenu] = useState(false);
 

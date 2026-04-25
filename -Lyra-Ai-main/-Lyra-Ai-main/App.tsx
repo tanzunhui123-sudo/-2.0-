@@ -54,12 +54,13 @@ import {
   RESOLUTIONS, OUTPUT_FORMATS, DESIGN_COLORS,
   ECOMMERCE_PLATFORMS, MAIN_IMAGE_STYLES, DETAIL_PAGE_SECTIONS
 } from './constants';
-import { Message, Mode, EcommercePlatform } from './types';
+import { Message, Mode, EcommercePlatform, EcommerceTask } from './types';
 import { 
   saveMessageToDB, getHistoryFromDB, clearHistoryDB,
   initGapiClient, initGisClient, requestAccessToken, 
   findHistoryFile, getFileContent, createHistoryFile, updateHistoryFile, DEFAULT_CLIENT_ID,
-  compressImageForApi, convertImageFormat, extractTextureCrop, compressImagePreservePng
+  compressImageForApi, convertImageFormat, extractTextureCrop, compressImagePreservePng,
+  saveImageToDriveByDate
 } from './utils';
 
 export default function App() {
@@ -92,6 +93,10 @@ export default function App() {
 
   // Expand State
   const [showExpandMenu, setShowExpandMenu] = useState(false);
+
+  // --- E-commerce Task Panel Persistent State ---
+  const [ecommerceTasks, setEcommerceTasks] = useState<EcommerceTask[]>([]);
+  const [ecommerceActiveTaskId, setEcommerceActiveTaskId] = useState<string | null>(null);
 
   // --- E-commerce State ---
   const [ecommercePlatform, setEcommercePlatform] = useState<EcommercePlatform>('taobao');
@@ -407,6 +412,9 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [clientId, setClientId] = useState<string>(() => localStorage.getItem('google_client_id') || '');
   const [showClientIdInput, setShowClientIdInput] = useState(false);
+  // Drive image save state
+  const [isDriveImageSaving, setIsDriveImageSaving] = useState(false);
+  const [driveImageSaveMsg, setDriveImageSaveMsg] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -550,6 +558,39 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
           localStorage.setItem('google_client_id', clientId.trim());
           setShowClientIdInput(false);
           handleDriveConnect();
+      }
+  };
+
+  // Save a single image to Google Drive in LyraStudio/{year}/{month}/{day}/ folder
+  const handleSaveImageToDrive = async (imageUrl: string) => {
+      if (!isDriveConnected) {
+          alert('请先连接 Google Drive 后再保存图片');
+          return;
+      }
+      if (isDriveImageSaving) return;
+      setIsDriveImageSaving(true);
+      setDriveImageSaveMsg(null);
+      try {
+          // Ensure we have a data URI (fetch remote URLs first)
+          let dataUri = imageUrl;
+          if (!imageUrl.startsWith('data:')) {
+              const resp = await fetch(imageUrl);
+              const blob = await resp.blob();
+              dataUri = await new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => resolve(reader.result as string);
+                  reader.onerror = reject;
+                  reader.readAsDataURL(blob);
+              });
+          }
+          await saveImageToDriveByDate(dataUri);
+          setDriveImageSaveMsg('✅ 已保存到 Google Drive');
+      } catch (e: any) {
+          console.error('Drive image save error:', e);
+          setDriveImageSaveMsg(`❌ 保存失败: ${e.message || '未知错误'}`);
+      } finally {
+          setIsDriveImageSaving(false);
+          setTimeout(() => setDriveImageSaveMsg(null), 3500);
       }
   };
 
@@ -2299,7 +2340,15 @@ ${qualitySuffix}`;
 
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-900 font-sans text-slate-800 dark:text-slate-200 overflow-hidden">
-      
+
+      {/* Drive Save Status Toast */}
+      {driveImageSaveMsg && (
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-5 py-3 rounded-2xl shadow-xl text-sm font-medium animate-in slide-in-from-bottom-4 fade-in duration-300 ${driveImageSaveMsg.startsWith('✅') ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+          <Cloud size={16} />
+          {driveImageSaveMsg}
+        </div>
+      )}
+
       {/* Sidebar */}
       <div className="w-20 md:w-64 bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between hidden md:flex z-20 overflow-y-auto">
         <div className="p-6">
@@ -2590,6 +2639,10 @@ ${qualitySuffix}`;
               onGenerateImage={ecommerceGenerateImage}
               onGenerateText={ecommerceGenerateText}
               apiProvider={apiProvider}
+              tasks={ecommerceTasks}
+              setTasks={setEcommerceTasks}
+              activeTaskId={ecommerceActiveTaskId}
+              setActiveTaskId={setEcommerceActiveTaskId}
             />
           </EcommerceErrorBoundary>
         )}
@@ -2607,6 +2660,7 @@ ${qualitySuffix}`;
                     onQuoteClick={handleQuotePrompt}
                     onSendToInput={handleImageToInput}
                     onSendToScene={handleImageToScene}
+                    onSaveToDrive={isDriveConnected ? handleSaveImageToDrive : undefined}
                 />
              ))}
              
@@ -3009,6 +3063,16 @@ ${qualitySuffix}`;
                     <Download size={18} />
                     <span className="text-sm font-medium">下载原图</span>
                   </button>
+                  {isDriveConnected && (
+                    <button
+                      onClick={() => handleSaveImageToDrive(previewImageUrl!)}
+                      disabled={isDriveImageSaving}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-500/80 hover:bg-blue-500 backdrop-blur-md text-white rounded-full transition-all border border-blue-400/30 disabled:opacity-60"
+                    >
+                      {isDriveImageSaving ? <Loader2 size={18} className="animate-spin" /> : <Cloud size={18} />}
+                      <span className="text-sm font-medium">保存到Drive</span>
+                    </button>
+                  )}
                </div>
             </div>
         </div>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Aperture, Copy, Check, Download, Brush, Quote, ImagePlus, Layers } from 'lucide-react';
+import { User, Aperture, Copy, Check, Download, Brush, Quote, ImagePlus, Layers, Cloud } from 'lucide-react';
 import { Message } from '../types';
 
 interface MessageBubbleProps {
@@ -9,9 +9,10 @@ interface MessageBubbleProps {
   onQuoteClick?: (text: string) => void;
   onSendToInput?: (url: string) => void;
   onSendToScene?: (url: string) => void;
+  onSaveToDrive?: (url: string) => void;
 }
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onImageClick, onEditClick, onQuoteClick, onSendToInput, onSendToScene }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onImageClick, onEditClick, onQuoteClick, onSendToInput, onSendToScene, onSaveToDrive }) => {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
   const [showRefMenu, setShowRefMenu] = useState(false);
@@ -130,6 +131,15 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onImageClick, on
              >
                <Download size={16} />
              </button>
+             {onSaveToDrive && (
+               <button
+                 onClick={(e) => { e.stopPropagation(); onSaveToDrive(content); }}
+                 className="p-2 bg-black/50 hover:bg-blue-600 text-white rounded-full backdrop-blur-sm transition-colors"
+                 title="保存到 Google Drive"
+               >
+                 <Cloud size={16} />
+               </button>
+             )}
            </div>
         </div>
       );

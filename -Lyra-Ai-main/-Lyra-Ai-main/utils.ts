@@ -532,3 +532,111 @@ export const getFileContent = async (fileId: string): Promise<Message[]> => {
     });
     return response.result as Message[];
 };
+
+// ---- Google Drive Image Upload (Date-Organized Folders) ----
+
+/**
+ * Find or create a Drive folder by name under a given parent (or root).
+ * Returns the folder's file ID.
+ */
+export const findOrCreateDriveFolder = async (name: string, parentId?: string): Promise<string> => {
+    const parentClause = parentId
+        ? `and '${parentId}' in parents`
+        : `and 'root' in parents`;
+    const q = `name = '${name}' and mimeType = 'application/vnd.google-apps.folder' ${parentClause} and trashed = false`;
+
+    const listResp = await gapi.client.drive.files.list({
+        q,
+        fields: 'files(id, name)',
+        spaces: 'drive',
+    });
+
+    const files = listResp.result.files;
+    if (files && files.length > 0) {
+        return files[0].id;
+    }
+
+    // Folder not found — create it
+    const metadata: any = {
+        name,
+        mimeType: 'application/vnd.google-apps.folder',
+    };
+    if (parentId) {
+        metadata.parents = [parentId];
+    }
+
+    const accessToken = gapi.client.getToken().access_token;
+    const resp = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + accessToken,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(metadata),
+    });
+    if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`创建文件夹失败: ${resp.status} ${errText}`);
+    }
+    const result = await resp.json();
+    return result.id;
+};
+
+/**
+ * Upload a base64 data URI image to Google Drive.
+ * Folder structure: LyraStudio/{year}/{month}/{day}/filename
+ * Returns the uploaded file's webViewLink.
+ */
+export const saveImageToDriveByDate = async (base64DataUri: string, filename?: string): Promise<string> => {
+    const now = new Date();
+    const year = now.getFullYear().toString();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+
+    const mimeType = base64DataUri.split(';')[0].split(':')[1] || 'image/png';
+    const ext = mimeType === 'image/jpeg' ? 'jpg' : (mimeType.split('/')[1] || 'png');
+    const finalFilename = filename || `LyraStudio_${year}${month}${day}_${Date.now()}.${ext}`;
+
+    // Build folder hierarchy: LyraStudio / year / month / day
+    const rootId = await findOrCreateDriveFolder('LyraStudio');
+    const yearId = await findOrCreateDriveFolder(year, rootId);
+    const monthId = await findOrCreateDriveFolder(month, yearId);
+    const dayId = await findOrCreateDriveFolder(day, monthId);
+
+    // Decode base64 to binary
+    const base64Data = base64DataUri.split(',')[1];
+    const binaryStr = atob(base64Data);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+    }
+    const imageBlob = new Blob([bytes], { type: mimeType });
+
+    const metadata = {
+        name: finalFilename,
+        mimeType,
+        parents: [dayId],
+    };
+
+    const accessToken = gapi.client.getToken().access_token;
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.append('file', imageBlob);
+
+    const resp = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+        {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + accessToken },
+            body: form,
+        }
+    );
+
+    if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`图片上传失败: ${resp.status} ${errText}`);
+    }
+
+    const result = await resp.json();
+    return result.webViewLink || result.id;
+};
