@@ -8,7 +8,7 @@ export interface Message {
   content: string;
 }
 
-export type Mode = 'architect' | 'master' | 'reskin' | 'mainImage' | 'detailPage';
+export type Mode = 'architect' | 'master' | 'reskin' | 'mainImage' | 'detailPage' | 'multiAngle' | 'imageTranslate' | 'removeBg' | 'upscale';
 
 export type EcommercePlatform = 'taobao' | 'jd' | 'pdd' | 'douyin' | 'xiaohongshu' | 'amazon' | 'custom';
 

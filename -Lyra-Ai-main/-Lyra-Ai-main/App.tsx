@@ -10,6 +10,7 @@ import { GoogleGenAI } from "@google/genai";
 import MessageBubble from './components/MessageBubble';
 import InpaintingModal from './components/InpaintingModal';
 import EcommerceTaskPanel from './components/EcommerceTaskPanel';
+import ImageToolsPanel from './components/ImageToolsPanel';
 
 // ErrorBoundary to catch React DOM reconciliation errors gracefully
 class EcommerceErrorBoundary extends React.Component<
@@ -136,6 +137,7 @@ export default function App() {
   const kieImageModels = [
     { id: 'nano-banana-2', name: 'Nano Banana 2 ⭐' },
     { id: 'nano-banana-pro', name: 'Nano Banana Pro' },
+    { id: 'gpt-image-2', name: 'GPT Image 2' },
   ];
 
   const textModelOptions = apiProvider === 'kie' ? kieTextModels : googleTextModels;
@@ -161,6 +163,12 @@ export default function App() {
     const iOpts = newProvider === 'kie' ? kieImageModels : googleImageModels;
     setSelectedTextModel(tOpts[0].id);
     setSelectedImageModel(iOpts[0].id);
+  };
+
+  // 内联切换图像模型时持久化（用于功能面板内的模型选择器）
+  const handleImageModelChange = (modelId: string) => {
+    setSelectedImageModel(modelId);
+    try { localStorage.setItem('lyra_image_model', modelId); } catch (_) {}
   };
 
   // Helper to get initialized AI client (Google SDK)
@@ -369,11 +377,23 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
     let model: string;
     let input: any;
     const userModel = selectedImageModel; // 用户在设置中选的模型
+    const isGptImage2 = userModel === 'gpt-image-2';
+    // GPT Image 2: aspect_ratio=auto 时只能生成 1K，2K/4K 必须指定非 auto 比例
+    const gptResolution = opts.resolution || '1K';
+    const rawRatio = opts.aspectRatio || 'auto';
+    const gptAspectRatio = (rawRatio === 'auto' || !rawRatio)
+      ? (gptResolution === '1K' ? 'auto' : '1:1')
+      : rawRatio;
 
     if (opts.isMask && imageUrls.length >= 2) {
       // Inpainting/Edit mode
-      model = userModel;
-      input = {
+      model = isGptImage2 ? 'gpt-image-2-image-to-image' : userModel;
+      input = isGptImage2 ? {
+        prompt: kiePrompt,
+        input_urls: imageUrls,
+        aspect_ratio: gptAspectRatio,
+        resolution: gptResolution
+      } : {
         prompt: kiePrompt,
         image_urls: imageUrls,
         output_format: opts.outputFormat || 'jpg',
@@ -382,8 +402,13 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
       };
     } else if (imageUrls.length > 0) {
       // Image-to-image
-      model = userModel;
-      input = {
+      model = isGptImage2 ? 'gpt-image-2-image-to-image' : userModel;
+      input = isGptImage2 ? {
+        prompt: kiePrompt,
+        input_urls: imageUrls,
+        aspect_ratio: gptAspectRatio,
+        resolution: gptResolution
+      } : {
         prompt: kiePrompt,
         image_input: imageUrls,
         output_format: opts.outputFormat || 'jpg',
@@ -392,8 +417,12 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
       };
     } else {
       // Text-to-image
-      model = userModel;
-      input = {
+      model = isGptImage2 ? 'gpt-image-2-text-to-image' : userModel;
+      input = isGptImage2 ? {
+        prompt: kiePrompt,
+        aspect_ratio: gptAspectRatio,
+        resolution: gptResolution
+      } : {
         prompt: kiePrompt,
         output_format: opts.outputFormat || 'jpg',
         aspect_ratio: opts.aspectRatio || '1:1',
@@ -401,9 +430,27 @@ OUTPUT: Photorealistic photograph with tangible material quality. Every surface 
       };
     }
 
-    const taskId = await kieCreateTask(model, input);
-    const urls = await kiePollTask(taskId);
-    return urls[0] || null;
+    // Retry up to 2 times on transient server-side failures (500 Internal Error)
+    const kieTaskRetries = 2;
+    for (let attempt = 0; attempt <= kieTaskRetries; attempt++) {
+      try {
+        const taskId = await kieCreateTask(model, input);
+        const urls = await kiePollTask(taskId);
+        return urls[0] || null;
+      } catch (err: any) {
+        const isTransient = err.message?.toLowerCase().includes('internal error')
+          || err.message?.includes('500')
+          || err.message?.includes('503');
+        if (isTransient && attempt < kieTaskRetries) {
+          const delay = 4000 * (attempt + 1);
+          console.warn(`KIE task failed (${err.message}), retrying (${attempt + 1}/${kieTaskRetries}) in ${delay / 1000}s...`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        throw err;
+      }
+    }
+    return null;
   };
 
   // --- Drive State ---
@@ -2198,6 +2245,17 @@ ${qualitySuffix}`;
     }
   };
 
+  // Image Tools: KIE simple task (for removeBg / upscale)
+  const kieSimpleTask = async (model: string, input: any): Promise<string[] | null> => {
+    const taskId = await kieCreateTask(model, input);
+    return await kiePollTask(taskId);
+  };
+
+  // Image Tools: expose upload helper for ImageToolsPanel
+  const kieUploadForTools = async (base64: string): Promise<string> => {
+    return await kieUploadImage(base64);
+  };
+
   // Settings modal JSX (shared between gate page and main app)
   const settingsModalJsx = showSettingsModal ? (
             <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
@@ -2393,6 +2451,23 @@ ${qualitySuffix}`;
               </button>
               <button onClick={() => setMode('detailPage')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${mode === 'detailPage' ? 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 shadow-sm ring-1 ring-rose-200 dark:ring-rose-700' : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-400'}`}>
                 <FileText size={20} /><div className="text-left hidden md:block"><div className="font-medium text-sm">详情页</div><div className="text-xs opacity-70">Detail Page</div></div>
+              </button>
+            </div>
+
+            {/* Image Tools Section */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 px-2 hidden md:block">图片工具</div>
+              <button onClick={() => setMode('multiAngle')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${mode === 'multiAngle' ? 'bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300 shadow-sm ring-1 ring-sky-200 dark:ring-sky-700' : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-400'}`}>
+                <RefreshCw size={20} /><div className="text-left hidden md:block"><div className="font-medium text-sm">多角度</div><div className="text-xs opacity-70">Multi-Angle</div></div>
+              </button>
+              <button onClick={() => setMode('imageTranslate')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${mode === 'imageTranslate' ? 'bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 shadow-sm ring-1 ring-violet-200 dark:ring-violet-700' : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-400'}`}>
+                <MoveHorizontal size={20} /><div className="text-left hidden md:block"><div className="font-medium text-sm">图片翻译</div><div className="text-xs opacity-70">Image Translate</div></div>
+              </button>
+              <button onClick={() => setMode('removeBg')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${mode === 'removeBg' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 shadow-sm ring-1 ring-emerald-200 dark:ring-emerald-700' : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-400'}`}>
+                <Eraser size={20} /><div className="text-left hidden md:block"><div className="font-medium text-sm">去除背景</div><div className="text-xs opacity-70">Remove BG</div></div>
+              </button>
+              <button onClick={() => setMode('upscale')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${mode === 'upscale' ? 'bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 shadow-sm ring-1 ring-orange-200 dark:ring-orange-700' : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-400'}`}>
+                <Scaling size={20} /><div className="text-left hidden md:block"><div className="font-medium text-sm">图片放大</div><div className="text-xs opacity-70">HD Upscale</div></div>
               </button>
             </div>
 
@@ -2692,23 +2767,38 @@ ${qualitySuffix}`;
         {/* Settings Modal */}
         {settingsModalJsx}
 
-        {/* E-commerce Task Panel (mainImage / detailPage modes) */}
-        {(mode === 'mainImage' || mode === 'detailPage') && (
+        {/* ── Single stable panel slot — always renders exactly one node ── */}
+        {(mode === 'mainImage' || mode === 'detailPage') ? (
           <EcommerceErrorBoundary>
             <EcommerceTaskPanel
               key="ecommerce-panel"
               onGenerateImage={ecommerceGenerateImage}
               onGenerateText={ecommerceGenerateText}
               apiProvider={apiProvider}
+              imageModels={imageModelOptions}
+              selectedImageModel={selectedImageModel}
+              onImageModelChange={handleImageModelChange}
               tasks={ecommerceTasks}
               setTasks={setEcommerceTasks}
               activeTaskId={ecommerceActiveTaskId}
               setActiveTaskId={setEcommerceActiveTaskId}
             />
           </EcommerceErrorBoundary>
-        )}
-        {mode !== 'mainImage' && mode !== 'detailPage' && (
-        <>
+        ) : (mode === 'multiAngle' || mode === 'imageTranslate' || mode === 'removeBg' || mode === 'upscale') ? (
+          <ImageToolsPanel
+            key={mode}
+            mode={mode as any}
+            apiProvider={apiProvider}
+            imageModels={imageModelOptions}
+            selectedImageModel={selectedImageModel}
+            onImageModelChange={handleImageModelChange}
+            onGenerateImage={ecommerceGenerateImage}
+            onGenerateText={ecommerceGenerateText}
+            onKieTask={kieSimpleTask}
+            onKieUpload={kieUploadForTools}
+          />
+        ) : (
+        <div className="flex-1 flex flex-col min-h-0">
         {/* Chat Area */}
         <div className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth">
            <div className="max-w-4xl mx-auto">
@@ -2882,6 +2972,21 @@ ${qualitySuffix}`;
               {/* Toolbar: For Master and Reskin Modes */}
               {(mode === 'master' || mode === 'reskin') && (
                 <div className="flex flex-wrap gap-3 w-full xl:w-auto animate-in fade-in duration-300">
+                  {apiProvider === 'kie' && (
+                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="px-2 text-slate-400 flex items-center gap-1"><Wand2 size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">Model</span></div>
+                      <select
+                        value={selectedImageModel}
+                        onChange={(e) => handleImageModelChange(e.target.value)}
+                        className="text-xs px-2 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 ring-1 ring-slate-200 dark:ring-slate-700 font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                        title="为本次生成选择 KIE.AI 图像模型"
+                      >
+                        {kieImageModels.map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
                     <div className="px-2 text-slate-400 flex items-center gap-1"><Layout size={14} /><span className="text-[10px] font-bold uppercase hidden sm:inline">Ratio</span></div>
                     <div className="flex gap-1 overflow-x-auto scrollbar-hide max-w-[200px] sm:max-w-none">
@@ -2992,7 +3097,7 @@ ${qualitySuffix}`;
             <div className="flex justify-center mt-3"><span className="text-[10px] text-slate-400 flex items-center gap-1"><Sparkles size={10} /> Powered by Lyra Architecture v2.0 (Gemini 3.0 Pro)</span></div>
           </div>
         </div>
-        </>
+        </div>
         )}
       </div>
       {previewImageUrl && (

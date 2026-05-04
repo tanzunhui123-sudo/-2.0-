@@ -54,6 +54,9 @@ interface EcommerceTaskPanelProps {
   }) => Promise<string | null>;
   onGenerateText: (prompt: string, images: string[]) => Promise<string>;
   apiProvider: 'google' | 'kie' | 'custom';
+  imageModels?: { id: string; name: string }[];
+  selectedImageModel?: string;
+  onImageModelChange?: (modelId: string) => void;
   tasks: EcommerceTask[];
   setTasks: React.Dispatch<React.SetStateAction<EcommerceTask[]>>;
   activeTaskId: string | null;
@@ -61,7 +64,7 @@ interface EcommerceTaskPanelProps {
 }
 
 // ========== Main Component ==========
-export default function EcommerceTaskPanel({ onGenerateImage, onGenerateText, apiProvider, tasks, setTasks, activeTaskId, setActiveTaskId }: EcommerceTaskPanelProps) {
+export default function EcommerceTaskPanel({ onGenerateImage, onGenerateText, apiProvider, imageModels, selectedImageModel, onImageModelChange, tasks, setTasks, activeTaskId, setActiveTaskId }: EcommerceTaskPanelProps) {
   // Task Management State
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewTaskMenu, setShowNewTaskMenu] = useState(false);
@@ -1040,6 +1043,25 @@ ABSOLUTE CONSTRAINTS:
                     {statusLabel(activeTask.status).text}
                   </span>
                 </div>
+
+                {/* Image Model Selector (KIE only) */}
+                {apiProvider === 'kie' && imageModels && imageModels.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
+                      🎨 图像生成模型 <span className="text-[10px] text-slate-400 font-normal">(本次生成使用)</span>
+                    </label>
+                    <select
+                      value={selectedImageModel}
+                      onChange={(e) => onImageModelChange && onImageModelChange(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-slate-700 dark:text-slate-200"
+                    >
+                      {imageModels.map(m => (
+                        <option key={m.id} value={m.id}>{m.name}</option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-slate-400 mt-1">在生成前可单独选择 KIE.AI 图像模型</p>
+                  </div>
+                )}
 
                 {/* Product Name */}
                 <div>
